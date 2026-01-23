@@ -9,11 +9,14 @@ const (
 )
 
 type Route struct {
-	Subdomain string
-	Host      string
-	Port      int
-	PID       int
-	Cwd       string
-	Disabled  bool
-	Source    RouteSource
+	Subdomain          string
+	Host               string
+	Port               int
+	TCPPort            int
+	PID                int
+	Cwd                string
+	Disabled           bool
+	Source             RouteSource
+	DockerHasAutoName  bool
+	DockerContainerID  string
 }

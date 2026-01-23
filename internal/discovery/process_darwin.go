@@ -25,6 +25,7 @@ import "C"
 import (
 	"bufio"
 	"context"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -49,14 +50,14 @@ type WellKnownProcess struct {
 }
 
 type ProcessWatcher struct {
-	basePath            string
-	onChange            func([]ListeningProcess)
-	onWellKnownChange   func([]WellKnownProcess)
-	ctx                 context.Context
-	cancel              context.CancelFunc
-	mu                  sync.RWMutex
-	current             map[int]ListeningProcess
-	currentWellKnown    map[int]WellKnownProcess
+	basePath          string
+	onChange          func([]ListeningProcess)
+	onWellKnownChange func([]WellKnownProcess)
+	ctx               context.Context
+	cancel            context.CancelFunc
+	mu                sync.RWMutex
+	current           map[int]ListeningProcess
+	currentWellKnown  map[int]WellKnownProcess
 }
 
 func NewProcessWatcher(basePath string) (*ProcessWatcher, error) {
@@ -189,8 +190,13 @@ func (w *ProcessWatcher) scan() ([]ListeningProcess, []WellKnownProcess, error) 
 	usedPorts := make(map[int]bool)
 	cwdCache := make(map[int]string)
 
+	ownPid := os.Getpid()
 	for _, entry := range listeners {
 		pid := entry.PID
+		if pid == ownPid {
+			continue
+		}
+
 		port := entry.Port
 
 		cwd, cached := cwdCache[pid]

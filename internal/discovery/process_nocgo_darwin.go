@@ -25,6 +25,7 @@ type WellKnownProcess struct {
 	PID       int
 	Port      int
 	Subdomain string
+	TCPPort   int
 }
 
 type ProcessWatcher struct {
@@ -180,11 +181,12 @@ func (w *ProcessWatcher) scan() ([]ListeningProcess, []WellKnownProcess, error) 
 		}
 
 		if cwd == "" {
-			if subdomain, ok := WellKnownPorts[port]; ok && !usedPorts[port] {
+			if info, ok := WellKnownPorts[port]; ok && !usedPorts[port] {
 				wellKnownResults = append(wellKnownResults, WellKnownProcess{
 					PID:       pid,
 					Port:      port,
-					Subdomain: subdomain,
+					Subdomain: info.Subdomain,
+					TCPPort:   info.TCPPort,
 				})
 				usedPorts[port] = true
 			}
@@ -192,11 +194,12 @@ func (w *ProcessWatcher) scan() ([]ListeningProcess, []WellKnownProcess, error) 
 		}
 
 		if !strings.HasPrefix(cwd, w.basePath) {
-			if subdomain, ok := WellKnownPorts[port]; ok && !usedPorts[port] {
+			if info, ok := WellKnownPorts[port]; ok && !usedPorts[port] {
 				wellKnownResults = append(wellKnownResults, WellKnownProcess{
 					PID:       pid,
 					Port:      port,
-					Subdomain: subdomain,
+					Subdomain: info.Subdomain,
+					TCPPort:   info.TCPPort,
 				})
 				usedPorts[port] = true
 			}

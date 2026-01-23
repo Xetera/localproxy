@@ -48,18 +48,18 @@ func main() {
 		log.Printf("updated routes: %d active", len(routes))
 	})
 
-	// dockerWatcher, err := discovery.NewDockerWatcher()
-	// log.Print(dockerWatcher)
-	// if err != nil {
-	// 	log.Printf("warning: docker watcher disabled: %v", err)
-	// } else {
-	// 	dockerWatcher.SetOnChange(func(containers []discovery.DockerContainer) {
-	// 		routeRegistry.UpdateDockerContainers(containers)
-	// 	})
-	// 	if err := dockerWatcher.Start(); err != nil {
-	// 		log.Printf("warning: failed to start docker watcher: %v", err)
-	// 	}
-	// }
+	dockerWatcher, err := discovery.NewDockerWatcher()
+	if err != nil {
+		log.Printf("warning: docker watcher disabled: %v", err)
+	} else {
+		dockerWatcher.SetOnChange(func(containers []discovery.DockerContainer) {
+			log.Printf("docker containers changed: %d", len(containers))
+			routeRegistry.UpdateDockerContainers(containers)
+		})
+		if err := dockerWatcher.Start(); err != nil {
+			log.Printf("warning: failed to start docker watcher: %v", err)
+		}
+	}
 
 	basePath := os.Getenv("LOCALPROXY_BASE_PATH")
 	if basePath == "" {
@@ -99,9 +99,9 @@ func main() {
 
 	log.Println("shutting down...")
 
-	// if dockerWatcher != nil {
-	// 	dockerWatcher.Stop()
-	// }
+	if dockerWatcher != nil {
+		dockerWatcher.Stop()
+	}
 	if processWatcher != nil {
 		processWatcher.Stop()
 	}

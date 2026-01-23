@@ -15,266 +15,471 @@
           sans-serif;
         background: #0a0a0a;
         color: #e5e5e5;
-        padding: 2rem;
+        height: 100vh;
+        overflow: hidden;
+      }
+      .header {
+        padding: 1.5rem 2rem;
+        border-bottom: 1px solid #262626;
       }
       h1 {
         font-size: 1.5rem;
-        margin-bottom: 1.5rem;
         color: #fff;
       }
-      h2 {
-        font-size: 1rem;
-        margin-top: 2rem;
-        margin-bottom: 1rem;
-        color: #737373;
-        font-weight: 500;
+      .grid-container {
+        display: grid;
+        grid-template-columns: 1fr 2fr;
+        height: calc(100vh - 80px);
       }
-      .empty {
-        color: #737373;
+      .service-list {
+        border-right: 1px solid #262626;
+        overflow-y: auto;
       }
-      table {
-        width: 100%;
-        border-collapse: collapse;
-        table-layout: fixed;
+      .service-item {
+        padding: 1rem 1.5rem;
+        border-bottom: 1px solid #1a1a1a;
+        cursor: pointer;
+        transition: background 0.15s;
+        border-left: 3px solid transparent;
       }
-      th,
-      td {
-        text-align: left;
-        padding: 0.75rem 1rem;
-        border-bottom: 1px solid #262626;
+      .service-item:hover {
+        background: #171717;
       }
-      th {
-        color: #a3a3a3;
+      .service-item.active {
+        background: #1e3a5f;
+        border-left: 3px solid #60a5fa;
+      }
+      .service-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0.5rem;
+      }
+      .service-name {
         font-weight: 500;
         font-size: 0.875rem;
+        color: #e5e5e5;
       }
-      td {
-        font-size: 0.875rem;
+      .service-item.active .service-name {
+        color: #fff;
       }
-      .col-service {
-        width: 30%;
-      }
-      .col-port {
-        width: 10%;
-      }
-      .col-pid {
-        width: 10%;
-      }
-      .col-cwd {
-        width: 50%;
-      }
-      a {
-        color: #60a5fa;
-        text-decoration: none;
-      }
-      a:hover {
-        text-decoration: underline;
-      }
-      .port {
-        color: #a3a3a3;
-        font-family: monospace;
-      }
-      .pid {
-        color: #737373;
-        font-family: monospace;
-      }
-      .cwd {
-        color: #737373;
+      .log-count {
         font-size: 0.75rem;
-        font-family: monospace;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      .disabled td {
-        opacity: 0.5;
-      }
-      .disabled a {
         color: #737373;
-        pointer-events: none;
+        font-family: monospace;
+      }
+      .service-item.active .log-count {
+        color: #93c5fd;
+      }
+      .service-meta {
+        font-size: 0.75rem;
+        color: #737373;
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+      }
+      .service-source {
+        display: flex;
+        align-items: center;
+        gap: 0.25rem;
       }
       .badge {
         display: inline-block;
         padding: 0.125rem 0.5rem;
         border-radius: 0.25rem;
-        font-size: 0.75rem;
-        margin-left: 0.5rem;
+        font-size: 0.7rem;
       }
-      .badge-disabled {
-        background: #292524;
-        color: #a8a29e;
+      .badge-warning {
+        background: #422006;
+        color: #f59e0b;
       }
       .badge-wellknown {
         background: #1e3a5f;
         color: #60a5fa;
+        outline: #60a5fa40 1px solid;
       }
-      .badge-count {
-        background: #262626;
-        color: #a3a3a3;
-        margin-left: 0.5rem;
+      .detail-panel {
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
       }
-      .section-header {
-        border-bottom: none;
-      }
-      .collapsible {
-        cursor: pointer;
-        user-select: none;
+      .detail-empty {
         display: flex;
         align-items: center;
-        gap: 0.5rem;
-      }
-      .collapsible::before {
-        content: "";
-        display: inline-block;
-        width: 0;
-        height: 0;
-        border-left: 5px solid transparent;
-        border-right: 5px solid transparent;
-        border-top: 6px solid #737373;
-        transition: transform 0.2s;
-      }
-      .collapsible.expanded::before {
-        transform: rotate(180deg);
-      }
-      .collapsed {
-        display: none;
-      }
-      .collapsible-table {
-        display: table-row-group;
-      }
-      .collapsible-table.collapsed tr {
-        display: none;
-      }
-      .wellknown-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-        gap: 0.5rem;
-        padding: 1rem;
-      }
-      .wellknown-item {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 0.5rem 0.75rem;
-        background: #171717;
-        border-radius: 0.375rem;
+        justify-content: center;
+        height: 100%;
+        color: #737373;
         font-size: 0.875rem;
       }
-      .wellknown-item.active {
-        background: #172554;
+      .detail-content {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
       }
-      .wellknown-item .name {
-        color: #a3a3a3;
+      .process-info {
+        padding: 1.5rem 2rem;
+        border-bottom: 1px solid #262626;
       }
-      .wellknown-item.active .name {
-        color: #60a5fa;
+      .process-title {
+        font-size: 1.25rem;
+        font-weight: 600;
+        color: #fff;
+        display: block;
+        margin-bottom: 1rem;
       }
-      .wellknown-item .port {
+      .metrics-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 1rem;
+      }
+      .metric-card {
+        background: #171717;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        border: 1px solid #262626;
+      }
+      .metric-label {
         font-size: 0.75rem;
+        color: #737373;
+        margin-bottom: 0.5rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
       }
-      .status-dot {
-        width: 6px;
-        height: 6px;
-        border-radius: 50%;
-        background: #374151;
+      .metric-value {
+        font-size: 1.5rem;
+        font-weight: 600;
+        color: #e5e5e5;
+        font-family: monospace;
+      }
+      .metric-unit {
+        font-size: 0.875rem;
+        color: #737373;
+        margin-left: 0.25rem;
+      }
+      .info-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 0.75rem;
+        margin-top: 1rem;
+      }
+      .info-item {
+        font-size: 0.875rem;
+      }
+      .info-label {
+        color: #737373;
         margin-right: 0.5rem;
       }
-      .status-dot.active {
-        background: #22c55e;
+      .info-value {
+        color: #e5e5e5;
+        font-family: monospace;
+      }
+      .logs-section {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        padding: 1.5rem 2rem;
+        min-height: 0;
+      }
+      .logs-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+      }
+      .logs-title {
+        font-size: 0.875rem;
+        font-weight: 600;
+        color: #a3a3a3;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      .logs-container {
+        flex: 1;
+        background: #000;
+        border: 1px solid #262626;
+        border-radius: 0.5rem;
+        padding: 1rem;
+        overflow-y: auto;
+        font-family: ui-monospace, monospace;
+        font-size: 0.8rem;
+        line-height: 1.5;
+      }
+      .log-line {
+        margin-bottom: 0.25rem;
+        white-space: pre-wrap;
+        word-break: break-all;
+      }
+      .no-logs {
+        color: #525252;
+        font-style: italic;
+        text-align: center;
+        padding: 2rem;
+      }
+      .section-divider {
+        padding: 0.75rem 1.5rem;
+        background: #171717;
+        border-bottom: 1px solid #262626;
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: #737373;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      .btn {
+        display: inline-block;
+        padding: 0.5rem 1rem;
+        font-size: 0.875rem;
+        border-radius: 0.375rem;
+        border: 1px solid #404040;
+        background: #1a1a1a;
+        color: #a3a3a3;
+        text-decoration: none;
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+      .btn:hover {
+        background: #262626;
+        color: #e5e5e5;
+        border-color: #525252;
+        text-decoration: none;
+      }
+      .btn-primary {
+        background: #1e3a5f;
+        border-color: #2563eb;
+        color: #60a5fa;
+      }
+      .btn-primary:hover {
+        background: #1e40af;
+        border-color: #3b82f6;
+        color: #93c5fd;
       }
     </style>
   </head>
   <body>
-    <h1>LocalProxy Dashboard</h1>
-    <table>
-      <thead>
-        <tr>
-          <th class="col-service">Service</th>
-          <th class="col-port">Port</th>
-          <th class="col-pid">PID</th>
-          <th class="col-cwd">Working Directory</th>
-        </tr>
-      </thead>
-      <tbody>
-        {{if .EnabledRoutes}} {{range .EnabledRoutes}}
-        <tr>
-          <td>
-            <a href="https://{{.Subdomain}}.localhost"
-              >{{.Subdomain}}.localhost</a
+    <div class="header">
+      <h1>LocalProxy</h1>
+    </div>
+    <div class="grid-container">
+      <div class="service-list">
+        {{if .EnabledRoutes}}
+        <div class="section-divider">Active Services</div>
+        {{range .EnabledRoutes}}
+        <div
+          class="service-item"
+          data-subdomain="{{.Subdomain}}"
+          onclick="selectService('{{.Subdomain}}')"
+        >
+          <div class="service-header">
+            <div class="service-name">{{.Subdomain}}.localhost</div>
+            <div class="log-count" id="count-{{.Subdomain}}">0 lines</div>
+          </div>
+          <div class="service-meta">
+            {{if eq .Source "docker"}}
+            <div class="service-source">
+              <svg
+                stroke="currentColor"
+                fill="currentColor"
+                stroke-width="0"
+                role="img"
+                viewBox="0 0 24 24"
+                height="10px"
+                width="10px"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M13.983 11.078h2.119a.186.186 0 00.186-.185V9.006a.186.186 0 00-.186-.186h-2.119a.185.185 0 00-.185.185v1.888c0 .102.083.185.185.185m-2.954-5.43h2.118a.186.186 0 00.186-.186V3.574a.186.186 0 00-.186-.185h-2.118a.185.185 0 00-.185.185v1.888c0 .102.082.185.185.185m0 2.716h2.118a.187.187 0 00.186-.186V6.29a.186.186 0 00-.186-.185h-2.118a.185.185 0 00-.185.185v1.887c0 .102.082.185.185.186m-2.93 0h2.12a.186.186 0 00.184-.186V6.29a.185.185 0 00-.185-.185H8.1a.185.185 0 00-.185.185v1.887c0 .102.083.185.185.186m-2.964 0h2.119a.186.186 0 00.185-.186V6.29a.185.185 0 00-.185-.185H5.136a.186.186 0 00-.186.185v1.887c0 .102.084.185.186.186m5.893 2.715h2.118a.186.186 0 00.186-.185V9.006a.186.186 0 00-.186-.186h-2.118a.185.185 0 00-.185.185v1.888c0 .102.082.185.185.185m-2.93 0h2.12a.185.185 0 00.184-.185V9.006a.185.185 0 00-.184-.186h-2.12a.185.185 0 00-.184.185v1.888c0 .102.083.185.185.185m-2.964 0h2.119a.185.185 0 00.185-.185V9.006a.185.185 0 00-.184-.186h-2.12a.186.186 0 00-.186.186v1.887c0 .102.084.185.186.185m-2.92 0h2.12a.185.185 0 00.184-.185V9.006a.185.185 0 00-.184-.186h-2.12a.185.185 0 00-.184.185v1.888c0 .102.082.185.185.185M23.763 9.89c-.065-.051-.672-.51-1.954-.51-.338.001-.676.03-1.01.087-.248-1.7-1.653-2.53-1.716-2.566l-.344-.199-.226.327c-.284.438-.49.922-.612 1.43-.23.97-.09 1.882.403 2.661-.595.332-1.55.413-1.744.42H.751a.751.751 0 00-.75.748 11.376 11.376 0 00.692 4.062c.545 1.428 1.355 2.48 2.41 3.124 1.18.723 3.1 1.137 5.275 1.137.983.003 1.963-.086 2.93-.266a12.248 12.248 0 003.823-1.389c.98-.567 1.86-1.288 2.61-2.136 1.252-1.418 1.998-2.997 2.553-4.4h.221c1.372 0 2.215-.549 2.68-1.009.309-.293.55-.65.707-1.046l.098-.288Z"
+                ></path>
+              </svg>
+              <span>Docker</span>
+            </div>
+            {{if .DockerHasAutoName}}
+            <span class="badge badge-warning">auto-name</span>
+            {{end}} {{end}} {{if eq .Source "process"}}
+            <div class="service-source">
+              <svg
+                width="10"
+                height="10"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <circle cx="12" cy="12" r="10"></circle>
+                <path d="M12 6v6l4 2"></path>
+              </svg>
+              <span>Process</span>
+            </div>
+            {{end}} {{if eq .Source "wellknown"}}
+            <span class="badge badge-wellknown">auto</span>
+            {{end}}
+            <span
+              >{{if .TCPPort}}tcp:{{.TCPPort}}{{else}}:{{.Port}}{{end}}</span
             >
-          </td>
-          <td class="port">{{.Port}}</td>
-          <td class="pid">{{.PID}}</td>
-          <td class="cwd">{{.Cwd}}</td>
-        </tr>
-        {{end}} {{else}}
-        <tr>
-          <td colspan="4" class="empty">No active services</td>
-        </tr>
-        {{end}} {{if .WellKnownRoutes}}
-        <tr class="section-header">
-          <td colspan="4"><h2>Well-Known Services</h2></td>
-        </tr>
-        {{range .WellKnownRoutes}}
-        <tr>
-          <td>
-            <a href="https://{{.Subdomain}}.localhost"
-              >{{.Subdomain}}.localhost</a
-            ><span class="badge badge-wellknown">auto</span>
-          </td>
-          <td class="port">{{.Port}}</td>
-          <td class="pid">{{.PID}}</td>
-          <td class="cwd">-</td>
-        </tr>
-        {{end}} {{end}} {{if .DisabledRoutes}}
-        <tr class="section-header">
-          <td colspan="4">
-            <h2 class="collapsible" onclick="toggleSection(this, 'disabled-routes')">
-              Disabled<span class="badge badge-count">{{len .DisabledRoutes}}</span>
-            </h2>
-          </td>
-        </tr>
-      </tbody>
-      <tbody class="collapsible-table collapsed" id="disabled-routes">
-        {{range .DisabledRoutes}}
-        <tr class="disabled">
-          <td>
-            {{.Subdomain}}.localhost<span class="badge badge-disabled"
-              >disabled</span
-            >
-          </td>
-          <td class="port">{{.Port}}</td>
-          <td class="pid">{{.PID}}</td>
-          <td class="cwd">{{.Cwd}}</td>
-        </tr>
-        {{end}}
-        {{end}}
-      </tbody>
-    </table>
-
-    {{if .InactiveWellKnown}}
-    <div style="margin-top: 2rem;">
-      <h2 class="collapsible" onclick="toggleSection(this, 'wellknown-list')">
-        Other Well-Known Ports<span class="badge badge-count">{{len .InactiveWellKnown}}</span>
-      </h2>
-      <div class="wellknown-grid collapsed" id="wellknown-list">
-        {{range .InactiveWellKnown}}
-        <div class="wellknown-item">
-          <span style="display: flex; align-items: center;">
-            <span class="status-dot"></span>
-            <span class="name">{{.Subdomain}}</span>
-          </span>
-          <span class="port">:{{.Port}}</span>
+          </div>
         </div>
-        {{end}}
+        {{end}} {{end}} {{if .WellKnownRoutes}}
+        <div class="section-divider">Well-Known Services</div>
+        {{range .WellKnownRoutes}}
+        <div
+          class="service-item"
+          data-subdomain="{{.Subdomain}}"
+          onclick="selectService('{{.Subdomain}}')"
+        >
+          <div class="service-header">
+            <div class="service-name">{{.Subdomain}}.localhost</div>
+            <div class="log-count" id="count-{{.Subdomain}}">0 lines</div>
+          </div>
+          <div class="service-meta">
+            <span class="badge badge-wellknown">auto</span>
+            <span>:{{.Port}}</span>
+            {{if .TCPPort}}<span>tcp:{{.TCPPort}}</span>{{end}}
+          </div>
+        </div>
+        {{end}} {{end}} {{if not .EnabledRoutes}} {{if not .WellKnownRoutes}}
+        <div class="detail-empty">No active services</div>
+        {{end}} {{end}}
+      </div>
+
+      <div class="detail-panel">
+        <div id="detail-empty" class="detail-empty">
+          Select a service to view details
+        </div>
+        <div id="detail-content" class="detail-content" style="display: none">
+          <div class="process-info">
+            <a class="process-title" id="detail-title" target="_blank"></a>
+            <div class="metrics-grid">
+              <div class="metric-card">
+                <div class="metric-label">Packets / Bytes</div>
+                <div class="metric-value" id="metric-packets">
+                  <span id="packets-value">0</span>
+                  <span class="metric-unit">rx</span>
+                  <span style="margin-left: 1rem" id="packets-tx">0</span>
+                  <span class="metric-unit">tx</span>
+                </div>
+              </div>
+              <div class="metric-card">
+                <div class="metric-label">Uptime</div>
+                <div class="metric-value" id="metric-uptime">-</div>
+              </div>
+            </div>
+            <div class="info-grid">
+              <div class="info-item">
+                <span class="info-label">PID:</span>
+                <span class="info-value" id="info-pid">-</span>
+              </div>
+              <div class="info-item">
+                <span class="info-label">User:</span>
+                <span class="info-value" id="info-user">-</span>
+              </div>
+              <div class="info-item">
+                <span class="info-label">Port:</span>
+                <span class="info-value" id="info-port">-</span>
+              </div>
+              <div class="info-item">
+                <span class="info-label">Working Dir:</span>
+                <span class="info-value" id="info-cwd">-</span>
+              </div>
+            </div>
+          </div>
+          <div class="logs-section">
+            <div class="logs-header">
+              <div class="logs-title">Live Logs</div>
+              <a
+                href="#"
+                class="btn btn-primary"
+                id="full-logs-btn"
+                target="_blank"
+                >Full Logs</a
+              >
+            </div>
+            <div class="logs-container" id="logs-container">
+              <div class="no-logs">No recent logs</div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
-    {{end}}
 
+    <script src="https://cdn.jsdelivr.net/npm/ansi_up@5.2.1/ansi_up.min.js"></script>
     <script>
-      function toggleSection(el, id) {
-        el.classList.toggle('expanded');
-        document.getElementById(id).classList.toggle('collapsed');
+      const ansi_up = new AnsiUp();
+      const routesData = {{.RoutesJSON}};
+      let selectedSubdomain = null;
+
+      function selectService(subdomain) {
+        selectedSubdomain = subdomain;
+
+        document.querySelectorAll('.service-item').forEach(el => {
+          el.classList.remove('active');
+        });
+        document.querySelector(`[data-subdomain="${subdomain}"]`).classList.add('active');
+
+        document.getElementById('detail-empty').style.display = 'none';
+        document.getElementById('detail-content').style.display = 'flex';
+
+        const route = routesData[subdomain];
+        if (!route) return;
+
+        const url = `https://${subdomain}.localhost`;
+        document.getElementById('detail-title').textContent = url;
+        document.getElementById('detail-title').href = url;
+        document.getElementById('info-pid').textContent = route.PID || '-';
+        document.getElementById('info-user').textContent = '-';
+        document.getElementById('info-port').textContent = route.TCPPort ? `tcp:${route.TCPPort}` : `:${route.Port}`;
+        document.getElementById('info-cwd').textContent = route.Cwd || '-';
+        document.getElementById('metric-uptime').textContent = '-';
+        document.getElementById('packets-value').textContent = '0';
+        document.getElementById('packets-tx').textContent = '0';
+        document.getElementById('full-logs-btn').href = `/logs?subdomain=${subdomain}`;
+
+        renderServiceLogs(subdomain);
       }
+
+      function renderServiceLogs(subdomain) {
+        const logsContainer = document.getElementById('logs-container');
+        const logsData = {{.LogsMapJSON}};
+        const logs = logsData[subdomain];
+
+        logsContainer.innerHTML = '';
+
+        if (logs && logs.length > 0) {
+          logs.forEach(line => {
+            const lineDiv = document.createElement('div');
+            lineDiv.className = 'log-line';
+            lineDiv.innerHTML = ansi_up.ansi_to_html(line);
+            logsContainer.appendChild(lineDiv);
+          });
+          logsContainer.scrollTop = logsContainer.scrollHeight;
+        } else {
+          logsContainer.innerHTML = '<div class="no-logs">No recent logs</div>';
+        }
+      }
+
+      function updateLogCounts(logsData) {
+        for (const [subdomain, logs] of Object.entries(logsData)) {
+          const countEl = document.getElementById(`count-${subdomain}`);
+          if (countEl) {
+            const count = logs ? logs.length : 0;
+            countEl.textContent = `${count} line${count !== 1 ? 's' : ''}`;
+          }
+        }
+
+        if (selectedSubdomain) {
+          renderServiceLogs(selectedSubdomain);
+        }
+      }
+
+      updateLogCounts({{.LogsMapJSON}});
+
+      setInterval(async () => {
+        try {
+          const response = await fetch('/api/logs-preview');
+          const data = await response.json();
+          updateLogCounts(data);
+        } catch (err) {
+          console.error('Failed to fetch logs:', err);
+        }
+      }, 2000);
     </script>
   </body>
 </html>

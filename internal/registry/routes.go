@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"log"
 	"sync"
 
 	"github.com/xetera/localproxy/internal/discovery"
@@ -33,12 +34,17 @@ func (r *RouteRegistry) UpdateDockerContainers(containers []discovery.DockerCont
 
 	r.dockerRoutes = make(map[string]proxy.Route)
 	for _, c := range containers {
-		r.dockerRoutes[c.Subdomain] = proxy.Route{
-			Subdomain: c.Subdomain,
-			Host:      c.IP,
-			Port:      c.Port,
-			Source:    proxy.RouteSourceDocker,
+		route := proxy.Route{
+			Subdomain:         c.Subdomain,
+			Host:              c.IP,
+			Port:              c.Port,
+			TCPPort:           c.TCPPort,
+			Source:            proxy.RouteSourceDocker,
+			DockerHasAutoName: !c.HasCustomName,
+			DockerContainerID: c.ID,
 		}
+		log.Printf("registry: docker route %s - HasCustomName=%v, DockerHasAutoName=%v, TCPPort=%d", c.Subdomain, c.HasCustomName, route.DockerHasAutoName, c.TCPPort)
+		r.dockerRoutes[c.Subdomain] = route
 	}
 
 	r.notifyChange()
@@ -74,6 +80,7 @@ func (r *RouteRegistry) UpdateWellKnownPorts(ports []discovery.WellKnownProcess)
 			Subdomain: p.Subdomain,
 			Host:      "localhost",
 			Port:      p.Port,
+			TCPPort:   p.TCPPort,
 			PID:       p.PID,
 			Source:    proxy.RouteSourceWellKnown,
 		}

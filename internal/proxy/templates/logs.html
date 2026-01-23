@@ -1,0 +1,107 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Logs - {{.Subdomain}} (PID {{.PID}})</title>
+    <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        font-family: ui-monospace, monospace;
+        background: #0a0a0a;
+        color: #e5e5e5;
+        padding: 1rem;
+        overflow: hidden;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+      .header {
+        padding: 1rem;
+        border-bottom: 1px solid #262626;
+        margin-bottom: 1rem;
+      }
+      h1 {
+        font-size: 1.25rem;
+        margin-bottom: 0.5rem;
+        color: #fff;
+      }
+      .meta {
+        font-size: 0.875rem;
+        color: #737373;
+      }
+      .logs-container {
+        flex: 1;
+        overflow-y: auto;
+        padding: 1rem;
+        background: #000;
+        border-radius: 0.5rem;
+        font-size: 0.875rem;
+        line-height: 1.5;
+      }
+      .log-line {
+        margin-bottom: 0.25rem;
+        white-space: pre-wrap;
+        word-break: break-all;
+      }
+      .loading {
+        color: #737373;
+        padding: 1rem;
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <h1>Logs: {{.Subdomain}}.localhost</h1>
+      <div class="meta">
+        PID: {{.PID}} | Port: {{.Port}}
+        {{if .Cwd}}| Working Directory: {{.Cwd}}{{end}}
+      </div>
+    </div>
+    <div class="logs-container" id="logs">
+      <div class="loading">Connecting to log stream...</div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/ansi_up@5.2.1/ansi_up.min.js"></script>
+    <script>
+      const logsContainer = document.getElementById('logs');
+      const eventSource = new EventSource('/logs?subdomain={{.Subdomain}}');
+      const ansi_up = new AnsiUp();
+      let initialized = false;
+
+      eventSource.onopen = function() {
+        if (!initialized) {
+          logsContainer.innerHTML = '<div class="loading">Waiting for logs...</div>';
+          initialized = true;
+        }
+      };
+
+      eventSource.onmessage = function(event) {
+        if (!initialized) {
+          logsContainer.innerHTML = '';
+          initialized = true;
+        }
+
+        const line = document.createElement('div');
+        line.className = 'log-line';
+        const text = event.data;
+
+        line.innerHTML = ansi_up.ansi_to_html(text);
+        logsContainer.appendChild(line);
+
+        logsContainer.scrollTop = logsContainer.scrollHeight;
+      };
+
+      eventSource.onerror = function() {
+        const errorLine = document.createElement('div');
+        errorLine.className = 'log-line';
+        errorLine.style.color = '#ef4444';
+        errorLine.textContent = 'Connection lost. Reconnecting...';
+        logsContainer.appendChild(errorLine);
+      };
+    </script>
+  </body>
+</html>
