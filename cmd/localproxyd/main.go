@@ -71,7 +71,15 @@ func main() {
 		log.Printf("warning: process watcher disabled: %v", err)
 	} else {
 		processWatcher.SetOnChange(func(processes []discovery.ListeningProcess) {
+			log.Printf("processes changed: %d", len(processes))
 			routeRegistry.UpdateProcesses(processes)
+		})
+		processWatcher.SetOnWellKnownChange(func(processes []discovery.WellKnownProcess) {
+			log.Printf("well-known changed: %d", len(processes))
+			for _, p := range processes {
+				log.Printf("  well-known: %s -> :%d (pid %d)", p.Subdomain, p.Port, p.PID)
+			}
+			routeRegistry.UpdateWellKnownPorts(processes)
 		})
 		if err := processWatcher.Start(); err != nil {
 			log.Printf("warning: failed to start process watcher: %v", err)

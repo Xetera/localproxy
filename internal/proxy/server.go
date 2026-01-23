@@ -3,17 +3,26 @@ package proxy
 import (
 	"context"
 	"crypto/tls"
+	"embed"
 	"fmt"
+	"html/template"
+	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/xetera/localproxy/internal/certs"
+	"github.com/xetera/localproxy/internal/discovery"
 )
+
+//go:embed templates/*.html
+var templateFS embed.FS
 
 type Server struct {
 	httpServer  *http.Server
@@ -51,6 +60,7 @@ func NewServer(certMgr *certs.CertManager) *Server {
 			TLSConfig:    tlsConfig,
 			ReadTimeout:  30 * time.Second,
 			WriteTimeout: 30 * time.Second,
+			ErrorLog:     log.New(io.Discard, "", 0),
 		}
 	}
 
@@ -124,12 +134,22 @@ func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if subdomain == "proxy" {
+		s.serveDashboard(w, r)
+		return
+	}
+
 	s.routesMu.RLock()
 	route, ok := s.routes[subdomain]
 	s.routesMu.RUnlock()
 
 	if !ok {
 		http.Error(w, fmt.Sprintf("no route for subdomain: %s", subdomain), http.StatusBadGateway)
+		return
+	}
+
+	if route.Disabled {
+		http.Error(w, fmt.Sprintf("route %s is disabled (outside base path)", subdomain), http.StatusForbidden)
 		return
 	}
 
@@ -159,6 +179,58 @@ func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	proxy.ServeHTTP(w, r)
+}
+
+func (s *Server) serveDashboard(w http.ResponseWriter, r *http.Request) {
+	s.routesMu.RLock()
+	var enabledRoutes, disabledRoutes, wellKnownRoutes []Route
+	for _, route := range s.routes {
+		if route.Disabled {
+			disabledRoutes = append(disabledRoutes, route)
+		} else if route.Source == RouteSourceWellKnown {
+			wellKnownRoutes = append(wellKnownRoutes, route)
+		} else {
+			enabledRoutes = append(enabledRoutes, route)
+		}
+	}
+	s.routesMu.RUnlock()
+
+	sort.Slice(enabledRoutes, func(i, j int) bool {
+		return enabledRoutes[i].Subdomain < enabledRoutes[j].Subdomain
+	})
+	sort.Slice(disabledRoutes, func(i, j int) bool {
+		return disabledRoutes[i].Subdomain < disabledRoutes[j].Subdomain
+	})
+	sort.Slice(wellKnownRoutes, func(i, j int) bool {
+		return wellKnownRoutes[i].Subdomain < wellKnownRoutes[j].Subdomain
+	})
+
+	activeWellKnown := make(map[string]bool)
+	for _, r := range wellKnownRoutes {
+		activeWellKnown[r.Subdomain] = true
+	}
+
+	allWellKnown := discovery.GetAllWellKnownPorts()
+	var inactiveWellKnown []discovery.WellKnownPort
+	for _, wk := range allWellKnown {
+		if !activeWellKnown[wk.Subdomain] {
+			inactiveWellKnown = append(inactiveWellKnown, wk)
+		}
+	}
+
+	tmpl, err := template.ParseFS(templateFS, "templates/dashboard.html")
+	if err != nil {
+		http.Error(w, fmt.Sprintf("template error: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	tmpl.Execute(w, map[string]interface{}{
+		"EnabledRoutes":       enabledRoutes,
+		"DisabledRoutes":      disabledRoutes,
+		"WellKnownRoutes":     wellKnownRoutes,
+		"InactiveWellKnown":   inactiveWellKnown,
+	})
 }
 
 func (s *Server) extractSubdomain(host string) string {

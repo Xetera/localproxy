@@ -8,16 +8,18 @@ import (
 )
 
 type RouteRegistry struct {
-	dockerRoutes  map[string]proxy.Route
-	processRoutes map[string]proxy.Route
-	mu            sync.RWMutex
-	onChange      func([]proxy.Route)
+	dockerRoutes     map[string]proxy.Route
+	processRoutes    map[string]proxy.Route
+	wellKnownRoutes  map[string]proxy.Route
+	mu               sync.RWMutex
+	onChange         func([]proxy.Route)
 }
 
 func NewRouteRegistry() *RouteRegistry {
 	return &RouteRegistry{
-		dockerRoutes:  make(map[string]proxy.Route),
-		processRoutes: make(map[string]proxy.Route),
+		dockerRoutes:    make(map[string]proxy.Route),
+		processRoutes:   make(map[string]proxy.Route),
+		wellKnownRoutes: make(map[string]proxy.Route),
 	}
 }
 
@@ -35,6 +37,7 @@ func (r *RouteRegistry) UpdateDockerContainers(containers []discovery.DockerCont
 			Subdomain: c.Subdomain,
 			Host:      c.IP,
 			Port:      c.Port,
+			Source:    proxy.RouteSourceDocker,
 		}
 	}
 
@@ -51,6 +54,28 @@ func (r *RouteRegistry) UpdateProcesses(processes []discovery.ListeningProcess) 
 			Subdomain: p.Subdomain,
 			Host:      "localhost",
 			Port:      p.Port,
+			PID:       p.PID,
+			Cwd:       p.Cwd,
+			Disabled:  p.Disabled,
+			Source:    proxy.RouteSourceProcess,
+		}
+	}
+
+	r.notifyChange()
+}
+
+func (r *RouteRegistry) UpdateWellKnownPorts(ports []discovery.WellKnownProcess) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.wellKnownRoutes = make(map[string]proxy.Route)
+	for _, p := range ports {
+		r.wellKnownRoutes[p.Subdomain] = proxy.Route{
+			Subdomain: p.Subdomain,
+			Host:      "localhost",
+			Port:      p.Port,
+			PID:       p.PID,
+			Source:    proxy.RouteSourceWellKnown,
 		}
 	}
 
@@ -65,10 +90,13 @@ func (r *RouteRegistry) GetRoutes() []proxy.Route {
 
 func (r *RouteRegistry) getRoutesLocked() []proxy.Route {
 	merged := make(map[string]proxy.Route)
-	for k, v := range r.processRoutes {
+	for k, v := range r.wellKnownRoutes {
 		merged[k] = v
 	}
 	for k, v := range r.dockerRoutes {
+		merged[k] = v
+	}
+	for k, v := range r.processRoutes {
 		merged[k] = v
 	}
 

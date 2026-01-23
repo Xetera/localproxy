@@ -1,0 +1,280 @@
+<!doctype html>
+<html>
+  <head>
+    <title>LocalProxy Dashboard</title>
+    <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        font-family:
+          system-ui,
+          -apple-system,
+          sans-serif;
+        background: #0a0a0a;
+        color: #e5e5e5;
+        padding: 2rem;
+      }
+      h1 {
+        font-size: 1.5rem;
+        margin-bottom: 1.5rem;
+        color: #fff;
+      }
+      h2 {
+        font-size: 1rem;
+        margin-top: 2rem;
+        margin-bottom: 1rem;
+        color: #737373;
+        font-weight: 500;
+      }
+      .empty {
+        color: #737373;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        table-layout: fixed;
+      }
+      th,
+      td {
+        text-align: left;
+        padding: 0.75rem 1rem;
+        border-bottom: 1px solid #262626;
+      }
+      th {
+        color: #a3a3a3;
+        font-weight: 500;
+        font-size: 0.875rem;
+      }
+      td {
+        font-size: 0.875rem;
+      }
+      .col-service {
+        width: 30%;
+      }
+      .col-port {
+        width: 10%;
+      }
+      .col-pid {
+        width: 10%;
+      }
+      .col-cwd {
+        width: 50%;
+      }
+      a {
+        color: #60a5fa;
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+      .port {
+        color: #a3a3a3;
+        font-family: monospace;
+      }
+      .pid {
+        color: #737373;
+        font-family: monospace;
+      }
+      .cwd {
+        color: #737373;
+        font-size: 0.75rem;
+        font-family: monospace;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .disabled td {
+        opacity: 0.5;
+      }
+      .disabled a {
+        color: #737373;
+        pointer-events: none;
+      }
+      .badge {
+        display: inline-block;
+        padding: 0.125rem 0.5rem;
+        border-radius: 0.25rem;
+        font-size: 0.75rem;
+        margin-left: 0.5rem;
+      }
+      .badge-disabled {
+        background: #292524;
+        color: #a8a29e;
+      }
+      .badge-wellknown {
+        background: #1e3a5f;
+        color: #60a5fa;
+      }
+      .badge-count {
+        background: #262626;
+        color: #a3a3a3;
+        margin-left: 0.5rem;
+      }
+      .section-header {
+        border-bottom: none;
+      }
+      .collapsible {
+        cursor: pointer;
+        user-select: none;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .collapsible::before {
+        content: "";
+        display: inline-block;
+        width: 0;
+        height: 0;
+        border-left: 5px solid transparent;
+        border-right: 5px solid transparent;
+        border-top: 6px solid #737373;
+        transition: transform 0.2s;
+      }
+      .collapsible.expanded::before {
+        transform: rotate(180deg);
+      }
+      .collapsed {
+        display: none;
+      }
+      .collapsible-table {
+        display: table-row-group;
+      }
+      .collapsible-table.collapsed tr {
+        display: none;
+      }
+      .wellknown-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 0.5rem;
+        padding: 1rem;
+      }
+      .wellknown-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0.5rem 0.75rem;
+        background: #171717;
+        border-radius: 0.375rem;
+        font-size: 0.875rem;
+      }
+      .wellknown-item.active {
+        background: #172554;
+      }
+      .wellknown-item .name {
+        color: #a3a3a3;
+      }
+      .wellknown-item.active .name {
+        color: #60a5fa;
+      }
+      .wellknown-item .port {
+        font-size: 0.75rem;
+      }
+      .status-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #374151;
+        margin-right: 0.5rem;
+      }
+      .status-dot.active {
+        background: #22c55e;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>LocalProxy Dashboard</h1>
+    <table>
+      <thead>
+        <tr>
+          <th class="col-service">Service</th>
+          <th class="col-port">Port</th>
+          <th class="col-pid">PID</th>
+          <th class="col-cwd">Working Directory</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{if .EnabledRoutes}} {{range .EnabledRoutes}}
+        <tr>
+          <td>
+            <a href="https://{{.Subdomain}}.localhost"
+              >{{.Subdomain}}.localhost</a
+            >
+          </td>
+          <td class="port">{{.Port}}</td>
+          <td class="pid">{{.PID}}</td>
+          <td class="cwd">{{.Cwd}}</td>
+        </tr>
+        {{end}} {{else}}
+        <tr>
+          <td colspan="4" class="empty">No active services</td>
+        </tr>
+        {{end}} {{if .WellKnownRoutes}}
+        <tr class="section-header">
+          <td colspan="4"><h2>Well-Known Services</h2></td>
+        </tr>
+        {{range .WellKnownRoutes}}
+        <tr>
+          <td>
+            <a href="https://{{.Subdomain}}.localhost"
+              >{{.Subdomain}}.localhost</a
+            ><span class="badge badge-wellknown">auto</span>
+          </td>
+          <td class="port">{{.Port}}</td>
+          <td class="pid">{{.PID}}</td>
+          <td class="cwd">-</td>
+        </tr>
+        {{end}} {{end}} {{if .DisabledRoutes}}
+        <tr class="section-header">
+          <td colspan="4">
+            <h2 class="collapsible" onclick="toggleSection(this, 'disabled-routes')">
+              Disabled<span class="badge badge-count">{{len .DisabledRoutes}}</span>
+            </h2>
+          </td>
+        </tr>
+      </tbody>
+      <tbody class="collapsible-table collapsed" id="disabled-routes">
+        {{range .DisabledRoutes}}
+        <tr class="disabled">
+          <td>
+            {{.Subdomain}}.localhost<span class="badge badge-disabled"
+              >disabled</span
+            >
+          </td>
+          <td class="port">{{.Port}}</td>
+          <td class="pid">{{.PID}}</td>
+          <td class="cwd">{{.Cwd}}</td>
+        </tr>
+        {{end}}
+        {{end}}
+      </tbody>
+    </table>
+
+    {{if .InactiveWellKnown}}
+    <div style="margin-top: 2rem;">
+      <h2 class="collapsible" onclick="toggleSection(this, 'wellknown-list')">
+        Other Well-Known Ports<span class="badge badge-count">{{len .InactiveWellKnown}}</span>
+      </h2>
+      <div class="wellknown-grid collapsed" id="wellknown-list">
+        {{range .InactiveWellKnown}}
+        <div class="wellknown-item">
+          <span style="display: flex; align-items: center;">
+            <span class="status-dot"></span>
+            <span class="name">{{.Subdomain}}</span>
+          </span>
+          <span class="port">:{{.Port}}</span>
+        </div>
+        {{end}}
+      </div>
+    </div>
+    {{end}}
+
+    <script>
+      function toggleSection(el, id) {
+        el.classList.toggle('expanded');
+        document.getElementById(id).classList.toggle('collapsed');
+      }
+    </script>
+  </body>
+</html>

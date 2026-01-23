@@ -18,15 +18,24 @@ type ListeningProcess struct {
 	Port      int
 	Subdomain string
 	Cwd       string
+	Disabled  bool
+}
+
+type WellKnownProcess struct {
+	PID       int
+	Port      int
+	Subdomain string
 }
 
 type ProcessWatcher struct {
-	basePath string
-	onChange func([]ListeningProcess)
-	ctx      context.Context
-	cancel   context.CancelFunc
-	mu       sync.RWMutex
-	current  map[int]ListeningProcess
+	basePath            string
+	onChange            func([]ListeningProcess)
+	onWellKnownChange   func([]WellKnownProcess)
+	ctx                 context.Context
+	cancel              context.CancelFunc
+	mu                  sync.RWMutex
+	current             map[int]ListeningProcess
+	currentWellKnown    map[int]WellKnownProcess
 }
 
 func NewProcessWatcher(basePath string) (*ProcessWatcher, error) {
@@ -38,10 +47,11 @@ func NewProcessWatcher(basePath string) (*ProcessWatcher, error) {
 	}
 
 	return &ProcessWatcher{
-		basePath: absPath,
-		ctx:      ctx,
-		cancel:   cancel,
-		current:  make(map[int]ListeningProcess),
+		basePath:         absPath,
+		ctx:              ctx,
+		cancel:           cancel,
+		current:          make(map[int]ListeningProcess),
+		currentWellKnown: make(map[int]WellKnownProcess),
 	}, nil
 }
 
@@ -49,8 +59,12 @@ func (w *ProcessWatcher) SetOnChange(fn func([]ListeningProcess)) {
 	w.onChange = fn
 }
 
+func (w *ProcessWatcher) SetOnWellKnownChange(fn func([]WellKnownProcess)) {
+	w.onWellKnownChange = fn
+}
+
 func (w *ProcessWatcher) Start() error {
-	processes, err := w.scan()
+	processes, wellKnown, err := w.scan()
 	if err != nil {
 		return err
 	}
@@ -60,10 +74,17 @@ func (w *ProcessWatcher) Start() error {
 	for _, p := range processes {
 		w.current[p.PID] = p
 	}
+	w.currentWellKnown = make(map[int]WellKnownProcess)
+	for _, p := range wellKnown {
+		w.currentWellKnown[p.PID] = p
+	}
 	w.mu.Unlock()
 
 	if w.onChange != nil {
 		w.onChange(processes)
+	}
+	if w.onWellKnownChange != nil {
+		w.onWellKnownChange(wellKnown)
 	}
 
 	go w.watchLoop()
@@ -83,7 +104,7 @@ func (w *ProcessWatcher) watchLoop() {
 		case <-w.ctx.Done():
 			return
 		case <-ticker.C:
-			processes, err := w.scan()
+			processes, wellKnown, err := w.scan()
 			if err != nil {
 				continue
 			}
@@ -99,34 +120,96 @@ func (w *ProcessWatcher) watchLoop() {
 				}
 			}
 
+			wellKnownChanged := len(wellKnown) != len(w.currentWellKnown)
+			if !wellKnownChanged {
+				for _, p := range wellKnown {
+					if existing, ok := w.currentWellKnown[p.PID]; !ok || existing.Port != p.Port {
+						wellKnownChanged = true
+						break
+					}
+				}
+			}
+
 			if changed {
 				w.current = make(map[int]ListeningProcess)
 				for _, p := range processes {
 					w.current[p.PID] = p
 				}
-				w.mu.Unlock()
+			}
 
-				if w.onChange != nil {
-					w.onChange(processes)
+			if wellKnownChanged {
+				w.currentWellKnown = make(map[int]WellKnownProcess)
+				for _, p := range wellKnown {
+					w.currentWellKnown[p.PID] = p
 				}
-			} else {
-				w.mu.Unlock()
+			}
+
+			w.mu.Unlock()
+
+			if changed && w.onChange != nil {
+				w.onChange(processes)
+			}
+			if wellKnownChanged && w.onWellKnownChange != nil {
+				w.onWellKnownChange(wellKnown)
 			}
 		}
 	}
 }
 
-func (w *ProcessWatcher) scan() ([]ListeningProcess, error) {
+func (w *ProcessWatcher) scan() ([]ListeningProcess, []WellKnownProcess, error) {
 	listeners, err := w.getListeningPorts()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	var results []ListeningProcess
+	var wellKnownResults []WellKnownProcess
+	ignoredDirs := map[string]bool{"apps": true, "packages": true}
+	usedPorts := make(map[int]bool)
+	seenPID := make(map[int]bool)
+	cwdCache := make(map[int]string)
 
-	for pid, port := range listeners {
-		cwd := w.getProcCwd(pid)
-		if cwd == "" || !strings.HasPrefix(cwd, w.basePath) {
+	for _, entry := range listeners {
+		pid := entry.PID
+		port := entry.Port
+
+		cwd, cached := cwdCache[pid]
+		if !cached {
+			cwd = w.getProcCwd(pid)
+			cwdCache[pid] = cwd
+		}
+
+		if cwd == "" {
+			if subdomain, ok := WellKnownPorts[port]; ok && !usedPorts[port] {
+				wellKnownResults = append(wellKnownResults, WellKnownProcess{
+					PID:       pid,
+					Port:      port,
+					Subdomain: subdomain,
+				})
+				usedPorts[port] = true
+			}
+			continue
+		}
+
+		if !strings.HasPrefix(cwd, w.basePath) {
+			if subdomain, ok := WellKnownPorts[port]; ok && !usedPorts[port] {
+				wellKnownResults = append(wellKnownResults, WellKnownProcess{
+					PID:       pid,
+					Port:      port,
+					Subdomain: subdomain,
+				})
+				usedPorts[port] = true
+			}
+			if !seenPID[pid] {
+				results = append(results, ListeningProcess{
+					PID:       pid,
+					Port:      port,
+					Subdomain: filepath.Base(cwd),
+					Cwd:       cwd,
+					Disabled:  true,
+				})
+				seenPID[pid] = true
+			}
 			continue
 		}
 
@@ -140,8 +223,6 @@ func (w *ProcessWatcher) scan() ([]ListeningProcess, error) {
 			continue
 		}
 
-		ignoredDirs := map[string]bool{"apps": true, "packages": true}
-
 		var filteredParts []string
 		for _, p := range parts {
 			if p != "" && p != "." && !ignoredDirs[p] {
@@ -153,44 +234,60 @@ func (w *ProcessWatcher) scan() ([]ListeningProcess, error) {
 			continue
 		}
 
+		disabled := len(filteredParts) > 2
+
 		var subdomainParts []string
 		for i := len(filteredParts) - 1; i >= 0; i-- {
 			subdomainParts = append(subdomainParts, filteredParts[i])
 		}
 		subdomain := strings.Join(subdomainParts, ".")
 
-		results = append(results, ListeningProcess{
-			PID:       pid,
-			Port:      port,
-			Subdomain: subdomain,
-			Cwd:       cwd,
-		})
+		if !seenPID[pid] {
+			results = append(results, ListeningProcess{
+				PID:       pid,
+				Port:      port,
+				Subdomain: subdomain,
+				Cwd:       cwd,
+				Disabled:  disabled,
+			})
+			seenPID[pid] = true
+		}
+		usedPorts[port] = true
 	}
 
-	return results, nil
+	return results, wellKnownResults, nil
 }
 
-func (w *ProcessWatcher) getListeningPorts() (map[int]int, error) {
+type portEntry struct {
+	PID  int
+	Port int
+}
+
+func (w *ProcessWatcher) getListeningPorts() ([]portEntry, error) {
 	cmd := exec.CommandContext(w.ctx, "lsof", "-i", "-P", "-n", "-sTCP:LISTEN")
 	output, err := cmd.Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok && len(exitErr.Stderr) == 0 {
-			return make(map[int]int), nil
+			return nil, nil
 		}
 		return nil, err
 	}
 
-	result := make(map[int]int)
+	var result []portEntry
 	scanner := bufio.NewScanner(strings.NewReader(string(output)))
 
 	for scanner.Scan() {
 		line := scanner.Text()
 		fields := strings.Fields(line)
-		if len(fields) < 9 {
+		if len(fields) < 10 {
 			continue
 		}
 
 		if fields[0] == "COMMAND" {
+			continue
+		}
+
+		if fields[7] != "TCP" {
 			continue
 		}
 
@@ -215,9 +312,7 @@ func (w *ProcessWatcher) getListeningPorts() (map[int]int, error) {
 			continue
 		}
 
-		if _, exists := result[pid]; !exists {
-			result[pid] = port
-		}
+		result = append(result, portEntry{PID: pid, Port: port})
 	}
 
 	return result, nil
