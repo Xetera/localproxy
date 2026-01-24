@@ -2,7 +2,7 @@ package xds
 
 import (
 	"fmt"
-	"os"
+	"net"
 	"time"
 
 	cluster "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
@@ -11,7 +11,9 @@ import (
 	listener "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
 	route "github.com/envoyproxy/go-control-plane/envoy/config/route/v3"
 	router "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/router/v3"
+	tlsinspector "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/listener/tls_inspector/v3"
 	hcm "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/http_connection_manager/v3"
+	tcpproxy "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/tcp_proxy/v3"
 	tls "github.com/envoyproxy/go-control-plane/envoy/extensions/transport_sockets/tls/v3"
 	"github.com/envoyproxy/go-control-plane/pkg/cache/types"
 	"github.com/envoyproxy/go-control-plane/pkg/cache/v3"
@@ -20,10 +22,19 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
+type Protocol string
+
+const (
+	ProtocolHTTP Protocol = "http"
+	ProtocolTCP  Protocol = "tcp"
+)
+
 type Route struct {
 	Subdomain string
 	Host      string
 	Port      int
+	TCPPort   int
+	Protocol  Protocol
 }
 
 type SnapshotBuilder struct {
@@ -39,16 +50,78 @@ func (b *SnapshotBuilder) Build(routes []Route, certPath, keyPath string) (*cach
 	versionStr := fmt.Sprintf("%d", b.version)
 
 	var clusters []types.Resource
-	var endpoints []types.Resource
+	var httpsFilterChains []*listener.FilterChain
+	var httpFilterChains []*listener.FilterChain
 	var virtualHosts []*route.VirtualHost
+
+	fmt.Println(certPath)
+	fmt.Println(keyPath)
+	// certData, err := os.ReadFile(certPath)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("failed to read cert: %w", err)
+	// }
+	// keyData, err := os.ReadFile(keyPath)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("failed to read key: %w", err)
+	// }
+
+	secrets := []types.Resource{
+		&tls.Secret{
+			Name: "wildcard_cert",
+			Type: &tls.Secret_TlsCertificate{
+				TlsCertificate: &tls.TlsCertificate{
+					CertificateChain: &core.DataSource{
+						Specifier: &core.DataSource_Filename{Filename: certPath},
+					},
+					PrivateKey: &core.DataSource{
+						Specifier: &core.DataSource_Filename{Filename: keyPath},
+					},
+				},
+			},
+		},
+	}
+
+	tlsContext := &tls.DownstreamTlsContext{
+		CommonTlsContext: &tls.CommonTlsContext{
+			// Required for proxying postgres
+			AlpnProtocols: []string{"h2", "postgresql"},
+			TlsCertificateSdsSecretConfigs: []*tls.SdsSecretConfig{{
+				Name: "wildcard_cert",
+				SdsConfig: &core.ConfigSource{
+					ResourceApiVersion: core.ApiVersion_V3,
+					ConfigSourceSpecifier: &core.ConfigSource_Ads{
+						Ads: &core.AggregatedConfigSource{},
+					},
+				},
+			}},
+		},
+	}
+
+	tlsContextAny, _ := anypb.New(tlsContext)
+
+	tlsTransportSocket := &core.TransportSocket{
+		Name:       "envoy.transport_sockets.tls",
+		ConfigType: &core.TransportSocket_TypedConfig{TypedConfig: tlsContextAny},
+	}
+
+	routerFilter, _ := anypb.New(&router.Router{})
+
+	tcpListenerChains := make(map[int][]*listener.FilterChain)
 
 	for _, r := range routes {
 		clusterName := fmt.Sprintf("cluster_%s", r.Subdomain)
+		sniDomain := fmt.Sprintf("%s.proxy.localhost", r.Subdomain)
+		fmt.Println("domain", sniDomain)
+
+		clusterType := cluster.Cluster_STATIC
+		if !isIPAddress(r.Host) {
+			clusterType = cluster.Cluster_STRICT_DNS
+		}
 
 		clusters = append(clusters, &cluster.Cluster{
 			Name:                 clusterName,
 			ConnectTimeout:       durationpb.New(5 * time.Second),
-			ClusterDiscoveryType: &cluster.Cluster_Type{Type: cluster.Cluster_STRICT_DNS},
+			ClusterDiscoveryType: &cluster.Cluster_Type{Type: clusterType},
 			LbPolicy:             cluster.Cluster_ROUND_ROBIN,
 			LoadAssignment: &endpoint.ClusterLoadAssignment{
 				ClusterName: clusterName,
@@ -74,116 +147,135 @@ func (b *SnapshotBuilder) Build(routes []Route, certPath, keyPath string) (*cach
 			},
 		})
 
-		virtualHosts = append(virtualHosts, &route.VirtualHost{
-			Name:    fmt.Sprintf("vhost_%s", r.Subdomain),
-			Domains: []string{fmt.Sprintf("%s.localhost", r.Subdomain)},
-			Routes: []*route.Route{{
-				Match: &route.RouteMatch{
-					PathSpecifier: &route.RouteMatch_Prefix{Prefix: "/"},
+		if r.Protocol == ProtocolTCP && r.TCPPort > 0 {
+			tcpProxyConfig := &tcpproxy.TcpProxy{
+				StatPrefix: fmt.Sprintf("tcp_%s", r.Subdomain),
+				ClusterSpecifier: &tcpproxy.TcpProxy_Cluster{
+					Cluster: clusterName,
 				},
-				Action: &route.Route_Route{
-					Route: &route.RouteAction{
-						ClusterSpecifier: &route.RouteAction_Cluster{Cluster: clusterName},
+			}
+			tcpProxyAny, _ := anypb.New(tcpProxyConfig)
+
+			tcpListenerChains[r.TCPPort] = append(tcpListenerChains[r.TCPPort], &listener.FilterChain{
+				FilterChainMatch: &listener.FilterChainMatch{
+					ServerNames: []string{sniDomain},
+				},
+				TransportSocket: tlsTransportSocket,
+				Filters: []*listener.Filter{{
+					Name:       "envoy.filters.network.tcp_proxy",
+					ConfigType: &listener.Filter_TypedConfig{TypedConfig: tcpProxyAny},
+				}},
+			})
+		} else {
+			virtualHosts = append(virtualHosts, &route.VirtualHost{
+				Name:    fmt.Sprintf("vhost_%s", r.Subdomain),
+				Domains: []string{sniDomain},
+				Routes: []*route.Route{{
+					Match: &route.RouteMatch{
+						PathSpecifier: &route.RouteMatch_Prefix{Prefix: "/"},
 					},
-				},
-			}},
-		})
-	}
-
-	routeConfig := &route.RouteConfiguration{
-		Name:         "local_route",
-		VirtualHosts: virtualHosts,
-	}
-
-	routeConfigAny, _ := anypb.New(routeConfig)
-	routerFilter, _ := anypb.New(&router.Router{})
-
-	httpConnMgr := &hcm.HttpConnectionManager{
-		CodecType:  hcm.HttpConnectionManager_AUTO,
-		StatPrefix: "ingress_http",
-		RouteSpecifier: &hcm.HttpConnectionManager_Rds{
-			Rds: &hcm.Rds{
-				ConfigSource: &core.ConfigSource{
-					ResourceApiVersion: core.ApiVersion_V3,
-					ConfigSourceSpecifier: &core.ConfigSource_Ads{
-						Ads: &core.AggregatedConfigSource{},
+					Action: &route.Route_Route{
+						Route: &route.RouteAction{
+							ClusterSpecifier: &route.RouteAction_Cluster{Cluster: clusterName},
+						},
 					},
-				},
-				RouteConfigName: "local_route",
-			},
-		},
-		HttpFilters: []*hcm.HttpFilter{{
-			Name:       "envoy.filters.http.router",
-			ConfigType: &hcm.HttpFilter_TypedConfig{TypedConfig: routerFilter},
-		}},
-	}
-
-	httpConnMgrAny, _ := anypb.New(httpConnMgr)
-
-	var listeners []types.Resource
-
-	listeners = append(listeners, &listener.Listener{
-		Name: "http_listener",
-		Address: &core.Address{
-			Address: &core.Address_SocketAddress{
-				SocketAddress: &core.SocketAddress{
-					Protocol: core.SocketAddress_TCP,
-					Address:  "0.0.0.0",
-					PortSpecifier: &core.SocketAddress_PortValue{
-						PortValue: 80,
-					},
-				},
-			},
-		},
-		FilterChains: []*listener.FilterChain{{
-			Filters: []*listener.Filter{{
-				Name:       "envoy.filters.network.http_connection_manager",
-				ConfigType: &listener.Filter_TypedConfig{TypedConfig: httpConnMgrAny},
-			}},
-		}},
-	})
-
-	var secrets []types.Resource
-
-	if certPath != "" && keyPath != "" {
-		certData, err := os.ReadFile(certPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read cert: %w", err)
+				}},
+			})
 		}
-		keyData, err := os.ReadFile(keyPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read key: %w", err)
-		}
+	}
 
-		secrets = append(secrets, &tls.Secret{
-			Name: "localhost_cert",
-			Type: &tls.Secret_TlsCertificate{
-				TlsCertificate: &tls.TlsCertificate{
-					CertificateChain: &core.DataSource{
-						Specifier: &core.DataSource_InlineBytes{InlineBytes: certData},
-					},
-					PrivateKey: &core.DataSource{
-						Specifier: &core.DataSource_InlineBytes{InlineBytes: keyData},
-					},
-				},
-			},
+	var routeConfigs []types.Resource
+
+	if len(virtualHosts) > 0 {
+		routeConfigs = append(routeConfigs, &route.RouteConfiguration{
+			Name:         "local_route",
+			VirtualHosts: virtualHosts,
 		})
 
-		tlsContext := &tls.DownstreamTlsContext{
-			CommonTlsContext: &tls.CommonTlsContext{
-				TlsCertificateSdsSecretConfigs: []*tls.SdsSecretConfig{{
-					Name: "localhost_cert",
-					SdsConfig: &core.ConfigSource{
+		httpsHcm := &hcm.HttpConnectionManager{
+			CodecType:  hcm.HttpConnectionManager_AUTO,
+			StatPrefix: "https_ingress",
+			RouteSpecifier: &hcm.HttpConnectionManager_Rds{
+				Rds: &hcm.Rds{
+					ConfigSource: &core.ConfigSource{
 						ResourceApiVersion: core.ApiVersion_V3,
 						ConfigSourceSpecifier: &core.ConfigSource_Ads{
 							Ads: &core.AggregatedConfigSource{},
 						},
 					},
-				}},
+					RouteConfigName: "local_route",
+				},
 			},
+			HttpFilters: []*hcm.HttpFilter{{
+				Name:       "envoy.filters.http.router",
+				ConfigType: &hcm.HttpFilter_TypedConfig{TypedConfig: routerFilter},
+			}},
 		}
-		tlsContextAny, _ := anypb.New(tlsContext)
+		httpsHcmAny, _ := anypb.New(httpsHcm)
 
+		httpsFilterChains = append(httpsFilterChains, &listener.FilterChain{
+			FilterChainMatch: &listener.FilterChainMatch{
+				ServerNames: []string{"*.localhost"},
+			},
+			TransportSocket: tlsTransportSocket,
+			Filters: []*listener.Filter{{
+				Name:       "envoy.filters.network.http_connection_manager",
+				ConfigType: &listener.Filter_TypedConfig{TypedConfig: httpsHcmAny},
+			}},
+		})
+
+		httpHcm := &hcm.HttpConnectionManager{
+			CodecType:  hcm.HttpConnectionManager_AUTO,
+			StatPrefix: "http_ingress",
+			RouteSpecifier: &hcm.HttpConnectionManager_Rds{
+				Rds: &hcm.Rds{
+					ConfigSource: &core.ConfigSource{
+						ResourceApiVersion: core.ApiVersion_V3,
+						ConfigSourceSpecifier: &core.ConfigSource_Ads{
+							Ads: &core.AggregatedConfigSource{},
+						},
+					},
+					RouteConfigName: "local_route",
+				},
+			},
+			HttpFilters: []*hcm.HttpFilter{{
+				Name:       "envoy.filters.http.router",
+				ConfigType: &hcm.HttpFilter_TypedConfig{TypedConfig: routerFilter},
+			}},
+		}
+		httpHcmAny, _ := anypb.New(httpHcm)
+
+		httpFilterChains = append(httpFilterChains, &listener.FilterChain{
+			Filters: []*listener.Filter{{
+				Name:       "envoy.filters.network.http_connection_manager",
+				ConfigType: &listener.Filter_TypedConfig{TypedConfig: httpHcmAny},
+			}},
+		})
+	}
+
+	tlsInspectorAny, _ := anypb.New(&tlsinspector.TlsInspector{})
+
+	var listeners []types.Resource
+
+	if len(httpFilterChains) > 0 {
+		listeners = append(listeners, &listener.Listener{
+			Name: "http_listener",
+			Address: &core.Address{
+				Address: &core.Address_SocketAddress{
+					SocketAddress: &core.SocketAddress{
+						Protocol: core.SocketAddress_TCP,
+						Address:  "0.0.0.0",
+						PortSpecifier: &core.SocketAddress_PortValue{
+							PortValue: 80,
+						},
+					},
+				},
+			},
+			FilterChains: httpFilterChains,
+		})
+	}
+
+	if len(httpsFilterChains) > 0 {
 		listeners = append(listeners, &listener.Listener{
 			Name: "https_listener",
 			Address: &core.Address{
@@ -197,16 +289,33 @@ func (b *SnapshotBuilder) Build(routes []Route, certPath, keyPath string) (*cach
 					},
 				},
 			},
-			FilterChains: []*listener.FilterChain{{
-				TransportSocket: &core.TransportSocket{
-					Name:       "envoy.transport_sockets.tls",
-					ConfigType: &core.TransportSocket_TypedConfig{TypedConfig: tlsContextAny},
-				},
-				Filters: []*listener.Filter{{
-					Name:       "envoy.filters.network.http_connection_manager",
-					ConfigType: &listener.Filter_TypedConfig{TypedConfig: httpConnMgrAny},
-				}},
+			ListenerFilters: []*listener.ListenerFilter{{
+				Name:       "envoy.filters.listener.tls_inspector",
+				ConfigType: &listener.ListenerFilter_TypedConfig{TypedConfig: tlsInspectorAny},
 			}},
+			FilterChains: httpsFilterChains,
+		})
+	}
+
+	for port, chains := range tcpListenerChains {
+		listeners = append(listeners, &listener.Listener{
+			Name: fmt.Sprintf("tcp_listener_%d", port),
+			Address: &core.Address{
+				Address: &core.Address_SocketAddress{
+					SocketAddress: &core.SocketAddress{
+						Protocol: core.SocketAddress_TCP,
+						Address:  "0.0.0.0",
+						PortSpecifier: &core.SocketAddress_PortValue{
+							PortValue: uint32(port),
+						},
+					},
+				},
+			},
+			ListenerFilters: []*listener.ListenerFilter{{
+				Name:       "envoy.filters.listener.tls_inspector",
+				ConfigType: &listener.ListenerFilter_TypedConfig{TypedConfig: tlsInspectorAny},
+			}},
+			FilterChains: chains,
 		})
 	}
 
@@ -214,8 +323,7 @@ func (b *SnapshotBuilder) Build(routes []Route, certPath, keyPath string) (*cach
 		versionStr,
 		map[resource.Type][]types.Resource{
 			resource.ClusterType:  clusters,
-			resource.EndpointType: endpoints,
-			resource.RouteType:    {routeConfigAny},
+			resource.RouteType:    routeConfigs,
 			resource.ListenerType: listeners,
 			resource.SecretType:   secrets,
 		},
@@ -225,4 +333,8 @@ func (b *SnapshotBuilder) Build(routes []Route, certPath, keyPath string) (*cach
 	}
 
 	return snap, nil
+}
+
+func isIPAddress(host string) bool {
+	return net.ParseIP(host) != nil
 }

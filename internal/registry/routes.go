@@ -58,7 +58,7 @@ func (r *RouteRegistry) UpdateProcesses(processes []discovery.ListeningProcess) 
 	for _, p := range processes {
 		r.processRoutes[p.Subdomain] = proxy.Route{
 			Subdomain: p.Subdomain,
-			Host:      "localhost",
+			Host:      "127.0.0.1",
 			Port:      p.Port,
 			PID:       p.PID,
 			Cwd:       p.Cwd,
@@ -78,7 +78,7 @@ func (r *RouteRegistry) UpdateWellKnownPorts(ports []discovery.WellKnownProcess)
 	for _, p := range ports {
 		r.wellKnownRoutes[p.Subdomain] = proxy.Route{
 			Subdomain: p.Subdomain,
-			Host:      "localhost",
+			Host:      "127.0.0.1",
 			Port:      p.Port,
 			TCPPort:   p.TCPPort,
 			PID:       p.PID,

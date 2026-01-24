@@ -3,17 +3,13 @@ package proxy
 import (
 	"bufio"
 	"context"
-	"crypto/tls"
 	"embed"
 	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
 	"log"
-	"net"
 	"net/http"
-	"net/http/httputil"
-	"net/url"
 	"os/exec"
 	"sort"
 	"strconv"
@@ -22,61 +18,41 @@ import (
 	"time"
 
 	"github.com/docker/docker/api/types/container"
-	"github.com/xetera/localproxy/internal/certs"
 	"github.com/xetera/localproxy/internal/discovery"
 )
 
 //go:embed templates/*.html
 var templateFS embed.FS
 
-type Server struct {
-	httpServer  *http.Server
-	httpsServer *http.Server
-	tcpProxy    *TCPProxy
-	routes      map[string]Route
-	routesMu    sync.RWMutex
-	certMgr     *certs.CertManager
-	logManager  *LogManager
+type DashboardServer struct {
+	server     *http.Server
+	routes     map[string]Route
+	routesMu   sync.RWMutex
+	logManager *LogManager
 }
 
-func NewServer(certMgr *certs.CertManager) *Server {
-	s := &Server{
+func NewDashboardServer() *DashboardServer {
+	s := &DashboardServer{
 		routes:     make(map[string]Route),
-		certMgr:    certMgr,
 		logManager: NewLogManager(),
-		tcpProxy:   NewTCPProxy(),
 	}
 
-	handler := http.HandlerFunc(s.handleRequest)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", s.serveDashboard)
+	mux.HandleFunc("/logs", s.serveLogs)
+	mux.HandleFunc("/api/logs-preview", s.serveLogsPreview)
 
-	s.httpServer = &http.Server{
-		Addr:         ":80",
-		Handler:      handler,
+	s.server = &http.Server{
+		Addr:         "127.0.0.1:8080",
+		Handler:      mux,
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
-	}
-
-	if certMgr != nil {
-		tlsConfig := &tls.Config{
-			MinVersion:     tls.VersionTLS12,
-			NextProtos:     []string{"h2", "http/1.1"},
-			GetCertificate: certMgr.GetCertificate,
-		}
-
-		s.httpsServer = &http.Server{
-			Addr:         ":443",
-			Handler:      handler,
-			TLSConfig:    tlsConfig,
-			ReadTimeout:  30 * time.Second,
-			WriteTimeout: 30 * time.Second,
-			ErrorLog:     log.New(io.Discard, "", 0),
-		}
 	}
 
 	return s
 }
 
-func (s *Server) UpdateRoutes(routes []Route) {
+func (s *DashboardServer) UpdateRoutes(routes []Route) {
 	s.routesMu.Lock()
 	defer s.routesMu.Unlock()
 
@@ -86,122 +62,23 @@ func (s *Server) UpdateRoutes(routes []Route) {
 	}
 
 	go s.logManager.UpdateRoutes(routes)
-	go s.tcpProxy.UpdateRoutes(routes)
 }
 
-func (s *Server) Start() error {
-	errCh := make(chan error, 2)
-
+func (s *DashboardServer) Start() error {
 	go func() {
-		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			errCh <- fmt.Errorf("http server: %w", err)
+		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("dashboard server error: %v", err)
 		}
 	}()
-
-	if s.httpsServer != nil {
-		go func() {
-			ln, err := tls.Listen("tcp", ":443", s.httpsServer.TLSConfig)
-			if err != nil {
-				errCh <- fmt.Errorf("https listener: %w", err)
-				return
-			}
-			if err := s.httpsServer.Serve(ln); err != nil && err != http.ErrServerClosed {
-				errCh <- fmt.Errorf("https server: %w", err)
-			}
-		}()
-	}
-
-	select {
-	case err := <-errCh:
-		return err
-	case <-time.After(100 * time.Millisecond):
-		return nil
-	}
+	return nil
 }
 
-func (s *Server) Stop() error {
+func (s *DashboardServer) Stop() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	s.logManager.Stop()
-	s.tcpProxy.Stop()
-
-	var errs []error
-	if err := s.httpServer.Shutdown(ctx); err != nil {
-		errs = append(errs, err)
-	}
-	if s.httpsServer != nil {
-		if err := s.httpsServer.Shutdown(ctx); err != nil {
-			errs = append(errs, err)
-		}
-	}
-
-	if len(errs) > 0 {
-		return errs[0]
-	}
-	return nil
-}
-
-func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
-	subdomain := s.extractSubdomain(r.Host)
-	if subdomain == "" {
-		http.Error(w, "no subdomain specified", http.StatusBadRequest)
-		return
-	}
-
-	if subdomain == "proxy" {
-		if r.URL.Path == "/logs" {
-			s.serveLogs(w, r)
-			return
-		}
-		if r.URL.Path == "/api/logs-preview" {
-			s.serveLogsPreview(w, r)
-			return
-		}
-		s.serveDashboard(w, r)
-		return
-	}
-
-	s.routesMu.RLock()
-	route, ok := s.routes[subdomain]
-	s.routesMu.RUnlock()
-
-	if !ok {
-		http.Error(w, fmt.Sprintf("no route for subdomain: %s", subdomain), http.StatusBadGateway)
-		return
-	}
-
-	if route.Disabled {
-		http.Error(w, fmt.Sprintf("route %s is disabled (outside base path)", subdomain), http.StatusForbidden)
-		return
-	}
-
-	target := &url.URL{
-		Scheme: "http",
-		Host:   net.JoinHostPort(route.Host, fmt.Sprintf("%d", route.Port)),
-	}
-
-	proxy := &httputil.ReverseProxy{
-		Director: func(req *http.Request) {
-			req.URL.Scheme = target.Scheme
-			req.URL.Host = target.Host
-			req.Host = r.Host
-		},
-		Transport: &http.Transport{
-			DialContext: (&net.Dialer{
-				Timeout:   10 * time.Second,
-				KeepAlive: 30 * time.Second,
-			}).DialContext,
-			MaxIdleConns:        100,
-			IdleConnTimeout:     90 * time.Second,
-			TLSHandshakeTimeout: 10 * time.Second,
-		},
-		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			http.Error(w, fmt.Sprintf("proxy error: %v", err), http.StatusBadGateway)
-		},
-	}
-
-	proxy.ServeHTTP(w, r)
+	return s.server.Shutdown(ctx)
 }
 
 type RouteWithLogs struct {
@@ -209,7 +86,12 @@ type RouteWithLogs struct {
 	RecentLogs []string
 }
 
-func (s *Server) serveDashboard(w http.ResponseWriter, r *http.Request) {
+func (s *DashboardServer) serveDashboard(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+
 	s.routesMu.RLock()
 	var enabledRoutes, disabledRoutes, wellKnownRoutes []RouteWithLogs
 	for _, route := range s.routes {
@@ -294,7 +176,7 @@ func (s *Server) serveDashboard(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) serveLogsPreview(w http.ResponseWriter, r *http.Request) {
+func (s *DashboardServer) serveLogsPreview(w http.ResponseWriter, r *http.Request) {
 	s.routesMu.RLock()
 	logsMap := make(map[string][]string)
 	for _, route := range s.routes {
@@ -316,7 +198,7 @@ func (s *Server) serveLogsPreview(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(logsMap)
 }
 
-func (s *Server) serveLogs(w http.ResponseWriter, r *http.Request) {
+func (s *DashboardServer) serveLogs(w http.ResponseWriter, r *http.Request) {
 	subdomain := r.URL.Query().Get("subdomain")
 	if subdomain == "" {
 		http.Error(w, "subdomain parameter required", http.StatusBadRequest)
@@ -353,7 +235,7 @@ func (s *Server) serveLogs(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request, subdomain string) {
+func (s *DashboardServer) streamLogs(w http.ResponseWriter, r *http.Request, subdomain string) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming not supported", http.StatusInternalServerError)
@@ -438,19 +320,4 @@ func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request, subdomain st
 	if err := scanner.Err(); err != nil {
 		log.Printf("log stream error: %v", err)
 	}
-}
-
-func (s *Server) extractSubdomain(host string) string {
-	host = strings.Split(host, ":")[0]
-
-	if !strings.HasSuffix(host, ".localhost") {
-		return ""
-	}
-
-	subdomain := strings.TrimSuffix(host, ".localhost")
-	if subdomain == "" {
-		return ""
-	}
-
-	return subdomain
 }

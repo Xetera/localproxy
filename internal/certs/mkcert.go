@@ -11,15 +11,20 @@ import (
 )
 
 type CertManager struct {
-	certsDir string
-	cache    map[string]*tls.Certificate
-	mu       sync.RWMutex
+	certsDir         string
+	cache            map[string]*tls.Certificate
+	mu               sync.RWMutex
+	wildcardCertPath string
+	wildcardKeyPath  string
 }
 
 func NewCertManager(dataDir string) *CertManager {
+	certsDir := filepath.Join(dataDir, "certs")
 	return &CertManager{
-		certsDir: filepath.Join(dataDir, "certs"),
-		cache:    make(map[string]*tls.Certificate),
+		certsDir:         certsDir,
+		cache:            make(map[string]*tls.Certificate),
+		wildcardCertPath: filepath.Join(certsDir, "wildcard.pem"),
+		wildcardKeyPath:  filepath.Join(certsDir, "wildcard-key.pem"),
 	}
 }
 
@@ -30,7 +35,35 @@ func (m *CertManager) Init() error {
 	if err := m.checkMkcert(); err != nil {
 		return err
 	}
-	return m.installCA()
+	if err := m.installCA(); err != nil {
+		return err
+	}
+	return m.generateWildcardCert()
+}
+
+func (m *CertManager) generateWildcardCert() error {
+	fmt.Println("Generating wildcard certificate...", m.wildcardCertPath)
+	if _, err := os.Stat(m.wildcardCertPath); err == nil {
+		if _, err := os.Stat(m.wildcardKeyPath); err == nil {
+			return nil
+		}
+	}
+
+	cmd := exec.Command("mkcert",
+		"-cert-file", m.wildcardCertPath,
+		"-key-file", m.wildcardKeyPath,
+		"proxy.localhost",
+		"*.proxy.localhost",
+	)
+	cmd.Dir = m.certsDir
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to generate wildcard cert: %w", err)
+	}
+	return nil
+}
+
+func (m *CertManager) GetWildcardCert() (certPath, keyPath string) {
+	return m.wildcardCertPath, m.wildcardKeyPath
 }
 
 func (m *CertManager) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
@@ -60,12 +93,12 @@ func (m *CertManager) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certifica
 }
 
 func (m *CertManager) getDomainForCert(serverName string) string {
-	serverName = strings.TrimSuffix(serverName, ".localhost")
+	serverName = strings.TrimSuffix(serverName, ".proxy.localhost")
 	parts := strings.Split(serverName, ".")
-	if len(parts) <= 1 {
-		return "localhost"
+	if len(parts) <= 2 {
+		return "proxy.localhost"
 	}
-	return parts[len(parts)-1] + ".localhost"
+	return parts[len(parts)-2] + ".proxy.localhost"
 }
 
 func (m *CertManager) generateCert(domain string) (*tls.Certificate, error) {
