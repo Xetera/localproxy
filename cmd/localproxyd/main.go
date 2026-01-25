@@ -62,17 +62,10 @@ func main() {
 	dashboardServer := proxy.NewDashboardServer()
 	routeRegistry := registry.NewRouteRegistry()
 
-	proxyRoute := xds.Route{
-		Subdomain: "proxy",
-		Host:      "127.0.0.1",
-		Port:      8080,
-		Protocol:  xds.ProtocolHTTP,
-	}
-
 	routeRegistry.SetOnChange(func(routes []proxy.Route) {
 		dashboardServer.UpdateRoutes(routes)
 
-		xdsRoutes := []xds.Route{proxyRoute}
+		xdsRoutes := []xds.Route{}
 		var subdomains []string
 
 		for _, r := range routes {
@@ -106,7 +99,7 @@ func main() {
 		log.Printf("updated routes: %d active", len(routes))
 	})
 
-	if err := xdsServer.UpdateSnapshot([]xds.Route{proxyRoute}, certPath, keyPath); err != nil {
+	if err := xdsServer.UpdateSnapshot([]xds.Route{}, certPath, keyPath); err != nil {
 		log.Printf("failed to set initial xds snapshot: %v", err)
 	}
 

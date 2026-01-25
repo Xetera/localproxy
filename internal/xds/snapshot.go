@@ -15,6 +15,7 @@ import (
 	hcm "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/http_connection_manager/v3"
 	tcpproxy "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/tcp_proxy/v3"
 	tls "github.com/envoyproxy/go-control-plane/envoy/extensions/transport_sockets/tls/v3"
+	quic "github.com/envoyproxy/go-control-plane/envoy/extensions/transport_sockets/quic/v3"
 	"github.com/envoyproxy/go-control-plane/pkg/cache/types"
 	"github.com/envoyproxy/go-control-plane/pkg/cache/v3"
 	"github.com/envoyproxy/go-control-plane/pkg/resource/v3"
@@ -91,6 +92,31 @@ func (b *SnapshotBuilder) Build(routes []Route, certPath, keyPath string) (*cach
 	tlsTransportSocket := &core.TransportSocket{
 		Name:       "envoy.transport_sockets.tls",
 		ConfigType: &core.TransportSocket_TypedConfig{TypedConfig: tlsContextAny},
+	}
+
+	quicTlsContext := &tls.DownstreamTlsContext{
+		CommonTlsContext: &tls.CommonTlsContext{
+			AlpnProtocols: []string{"h3"},
+			TlsCertificateSdsSecretConfigs: []*tls.SdsSecretConfig{{
+				Name: "wildcard_cert",
+				SdsConfig: &core.ConfigSource{
+					ResourceApiVersion: core.ApiVersion_V3,
+					ConfigSourceSpecifier: &core.ConfigSource_Ads{
+						Ads: &core.AggregatedConfigSource{},
+					},
+				},
+			}},
+		},
+	}
+
+	quicDownstream := &quic.QuicDownstreamTransport{
+		DownstreamTlsContext: quicTlsContext,
+	}
+	quicDownstreamAny, _ := anypb.New(quicDownstream)
+
+	quicTransportSocket := &core.TransportSocket{
+		Name:       "envoy.transport_sockets.quic",
+		ConfigType: &core.TransportSocket_TypedConfig{TypedConfig: quicDownstreamAny},
 	}
 
 	routerFilter, _ := anypb.New(&router.Router{})
@@ -176,6 +202,12 @@ func (b *SnapshotBuilder) Build(routes []Route, certPath, keyPath string) (*cach
 						Route: &route.RouteAction{
 							ClusterSpecifier: &route.RouteAction_Cluster{Cluster: clusterName},
 						},
+					},
+				}},
+				ResponseHeadersToAdd: []*core.HeaderValueOption{{
+					Header: &core.HeaderValue{
+						Key:   "alt-svc",
+						Value: `h3=":443"; ma=86400`,
 					},
 				}},
 			})
@@ -292,6 +324,56 @@ func (b *SnapshotBuilder) Build(routes []Route, certPath, keyPath string) (*cach
 				ConfigType: &listener.ListenerFilter_TypedConfig{TypedConfig: tlsInspectorAny},
 			}},
 			FilterChains: httpsFilterChains,
+		})
+		http3Hcm := &hcm.HttpConnectionManager{
+			CodecType:  hcm.HttpConnectionManager_HTTP3,
+			StatPrefix: "http3_ingress",
+			RouteSpecifier: &hcm.HttpConnectionManager_Rds{
+				Rds: &hcm.Rds{
+					ConfigSource: &core.ConfigSource{
+						ResourceApiVersion: core.ApiVersion_V3,
+						ConfigSourceSpecifier: &core.ConfigSource_Ads{
+							Ads: &core.AggregatedConfigSource{},
+						},
+					},
+					RouteConfigName: "local_route",
+				},
+			},
+			HttpFilters: []*hcm.HttpFilter{{
+				Name:       "envoy.filters.http.router",
+				ConfigType: &hcm.HttpFilter_TypedConfig{TypedConfig: routerFilter},
+			}},
+		}
+		http3HcmAny, _ := anypb.New(http3Hcm)
+
+		quicFilterChains := []*listener.FilterChain{{
+			FilterChainMatch: &listener.FilterChainMatch{
+				ServerNames: []string{"*.proxy.localhost", "proxy.localhost", "*.proxy.internal", "proxy.internal"},
+			},
+			TransportSocket: quicTransportSocket,
+			Filters: []*listener.Filter{{
+				Name:       "envoy.filters.network.http_connection_manager",
+				ConfigType: &listener.Filter_TypedConfig{TypedConfig: http3HcmAny},
+			}},
+		}}
+
+		listeners = append(listeners, &listener.Listener{
+			Name: "quic_listener",
+			Address: &core.Address{
+				Address: &core.Address_SocketAddress{
+					SocketAddress: &core.SocketAddress{
+						Protocol: core.SocketAddress_UDP,
+						Address:  "0.0.0.0",
+						PortSpecifier: &core.SocketAddress_PortValue{
+							PortValue: 443,
+						},
+					},
+				},
+			},
+			UdpListenerConfig: &listener.UdpListenerConfig{
+				QuicOptions: &listener.QuicProtocolOptions{},
+			},
+			FilterChains: quicFilterChains,
 		})
 	}
 
