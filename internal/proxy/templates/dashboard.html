@@ -270,7 +270,7 @@
           onclick="selectService('{{.Subdomain}}')"
         >
           <div class="service-header">
-            <div class="service-name">{{.Subdomain}}.localhost</div>
+            <div class="service-name">{{.Subdomain}}.proxy.localhost</div>
             <div class="log-count" id="count-{{.Subdomain}}">0 lines</div>
           </div>
           <div class="service-meta">
@@ -326,11 +326,16 @@
           onclick="selectService('{{.Subdomain}}')"
         >
           <div class="service-header">
-            <div class="service-name">{{.Subdomain}}.localhost</div>
+            <div class="service-name">
+              {{if
+              .Subdomain}}{{.Subdomain}}.proxy.localhost{{else}}proxy.localhost{{end}}
+            </div>
             <div class="log-count" id="count-{{.Subdomain}}">0 lines</div>
           </div>
           <div class="service-meta">
-            <span class="badge badge-wellknown">auto</span>
+            <span class="badge badge-wellknown"
+              >{{if .Subdomain}}auto{{else}}self{{end}}</span
+            >
             <span>:{{.Port}}</span>
             {{if .TCPPort}}<span>tcp:{{.TCPPort}}</span>{{end}}
           </div>
@@ -420,7 +425,7 @@
         const route = routesData[subdomain];
         if (!route) return;
 
-        const url = `https://${subdomain}.localhost`;
+        const url = `https://${subdomain ? `${subdomain}.` : ''}proxy.localhost`;
         document.getElementById('detail-title').textContent = url;
         document.getElementById('detail-title').href = url;
         document.getElementById('info-pid').textContent = route.PID || '-';

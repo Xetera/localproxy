@@ -54,17 +54,6 @@ func (b *SnapshotBuilder) Build(routes []Route, certPath, keyPath string) (*cach
 	var httpFilterChains []*listener.FilterChain
 	var virtualHosts []*route.VirtualHost
 
-	fmt.Println(certPath)
-	fmt.Println(keyPath)
-	// certData, err := os.ReadFile(certPath)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("failed to read cert: %w", err)
-	// }
-	// keyData, err := os.ReadFile(keyPath)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("failed to read key: %w", err)
-	// }
-
 	secrets := []types.Resource{
 		&tls.Secret{
 			Name: "wildcard_cert",
@@ -83,8 +72,8 @@ func (b *SnapshotBuilder) Build(routes []Route, certPath, keyPath string) (*cach
 
 	tlsContext := &tls.DownstreamTlsContext{
 		CommonTlsContext: &tls.CommonTlsContext{
-			// Required for proxying postgres
-			AlpnProtocols: []string{"h2", "postgresql"},
+
+			AlpnProtocols: []string{"h2" /* required for proxying pg */, "postgresql"},
 			TlsCertificateSdsSecretConfigs: []*tls.SdsSecretConfig{{
 				Name: "wildcard_cert",
 				SdsConfig: &core.ConfigSource{
@@ -109,9 +98,14 @@ func (b *SnapshotBuilder) Build(routes []Route, certPath, keyPath string) (*cach
 	tcpListenerChains := make(map[int][]*listener.FilterChain)
 
 	for _, r := range routes {
-		clusterName := fmt.Sprintf("cluster_%s", r.Subdomain)
-		sniDomain := fmt.Sprintf("%s.proxy.localhost", r.Subdomain)
-		fmt.Println("domain", sniDomain)
+		var clusterName, sniDomain string
+		if r.Subdomain == "" {
+			clusterName = "cluster_root"
+			sniDomain = "proxy.localhost"
+		} else {
+			clusterName = fmt.Sprintf("cluster_%s", r.Subdomain)
+			sniDomain = fmt.Sprintf("%s.proxy.localhost", r.Subdomain)
+		}
 
 		clusterType := cluster.Cluster_STATIC
 		if !isIPAddress(r.Host) {
@@ -215,7 +209,7 @@ func (b *SnapshotBuilder) Build(routes []Route, certPath, keyPath string) (*cach
 
 		httpsFilterChains = append(httpsFilterChains, &listener.FilterChain{
 			FilterChainMatch: &listener.FilterChainMatch{
-				ServerNames: []string{"*.localhost"},
+				ServerNames: []string{"*.proxy.localhost", "proxy.localhost"},
 			},
 			TransportSocket: tlsTransportSocket,
 			Filters: []*listener.Filter{{

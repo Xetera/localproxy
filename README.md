@@ -1,0 +1,75 @@
+# Localproxy
+
+![](./showcase.jpg)
+
+Programming is both my job and my hobby, and I have the convenience of using the same laptop to do both. That means after work hours, I tend to close my text editor and open it back up to another project. At work, the webservers in our monorepo use ports 3000-3005. And because we do a lot of testing with databases, I often end up having postgres running on ports 5432, 5431, 5454, not knowing which instance exposes which port. At home, my own projects are an even bigger mess, running on 3030, 8080, 8081, 7000, you name it. I hate having to remember these numbers.
+
+Localproxy solves this problem for me. It runs envoy on port 80 and 443 with a self-signed certificate using [mkcert](https://github.com/FiloSottile/mkcert), and auto-discovers targets from both docker using `EXPOSE` fields and [labels](#docker-example-with-labels), and local processes listening to ports running directly under a given "projects" folder. To allow for non-browser tools to also function, the current running processes are also appended to `/etc/hosts` to make sure they point to 127.0.0.1, and are not resolved through external DNS. This is not already the default behavior on macos for some reason.
+
+Localproxy supports proxying both http and tcp connections, provided TCP connections use TLS to allow determining the target domain, since that information is missing without a layer 7 protocol involved (ex: redis with `--tls --sni` and postgres with `?sslnegotiation=direct`)
+
+Certain well-known ports on your computer are also checked to detect software you may have running locally outside your regular "projects" folder like syncthing, to also proxy connections there as well.
+
+This project is currently WIP, so you'll have to install both `mkcer` and `envoy` and build the project from source using the following command. I've only tested this on macos so far but I plan for it to support any platform/architecture envoy supports.
+
+```sh
+sudo CGO_ENABLED=0 go run ./cmd/localproxyd --watch ~/myprojects
+```
+
+### Local process example
+
+```sh
+cd ~/myprojects/project1
+# run a webserver on any port
+npm run dev
+# localproxy uses the path passed to --watch to
+# automatically detect processes running in its sub-folders
+curl https://project1.proxy.localhost
+```
+
+### Docker example with labels
+
+Proxying traffic to docker containers works without exposing ports using `-p`.
+
+#### Postgres
+
+```sh
+docker run --name postgres -l localproxy.tcpport=5432 -e POSTGRES_HOST_AUTH_METHOD=trust postgres
+```
+
+Two requirements for connection:
+
+1. `sslmode` has to be require to not attempt a plaintext connection
+2. `sslnegotiation` has to be `direct` to use TLS instead of STARTTLS
+
+```sh
+psql "postgresql://postgres@postgres.proxy.localhost/postgres?sslmode=require&sslnegotiation=direct"
+```
+
+#### Redis
+
+```sh
+docker run --name myredis -l localproxy.tcpport=6379 redis
+```
+
+Connect to it from the host without exposing ports. Sadly redis-cli doesn't seem to use the local trust chain on macos. You may be able to omit `--insecure` on other platforms.
+
+```sh
+redis-cli --tls --insecure -h myredis.proxy.localhost --sni myredis.proxy.localhost
+# If you want to explicitly verify the certificate
+redis-cli --tls --cacert "$(mkcert -CAROOT)/rootCA.pem" -h myredis.proxy.localhost --sni myredis.proxy.localhost
+```
+
+### Logs
+
+By default localproxy tries to capture stdout logs from local processes as well as docker containers. However on macos this requires you to partially turn off SIP in recovery mode with
+
+```sh
+csrutil enable --without dtrace
+```
+
+If you're a yabai user, you'll want to combine this with the flags yabai requires. [Relevant documentation.](https://github.com/asmvik/yabai/wiki/Disabling-System-Integrity-Protection)
+
+```sh
+csrutil enable --without dtrace --without fs --without debug --without nvram
+```

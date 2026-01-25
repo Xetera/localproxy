@@ -21,6 +21,10 @@ import (
 	"github.com/xetera/localproxy/internal/discovery"
 )
 
+const (
+	ServerPort = 13279
+)
+
 //go:embed templates/*.html
 var templateFS embed.FS
 
@@ -43,7 +47,7 @@ func NewDashboardServer() *DashboardServer {
 	mux.HandleFunc("/api/logs-preview", s.serveLogsPreview)
 
 	s.server = &http.Server{
-		Addr:         "127.0.0.1:8080",
+		Addr:         fmt.Sprintf("127.0.0.1:%d", ServerPort),
 		Handler:      mux,
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,

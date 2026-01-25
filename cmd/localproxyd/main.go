@@ -74,7 +74,6 @@ func main() {
 
 		xdsRoutes := []xds.Route{proxyRoute}
 		var subdomains []string
-		subdomains = append(subdomains, "proxy")
 
 		for _, r := range routes {
 			if r.Disabled {

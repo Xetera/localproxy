@@ -2,6 +2,7 @@ package registry
 
 import (
 	"log"
+	"maps"
 	"sync"
 
 	"github.com/xetera/localproxy/internal/discovery"
@@ -9,11 +10,11 @@ import (
 )
 
 type RouteRegistry struct {
-	dockerRoutes     map[string]proxy.Route
-	processRoutes    map[string]proxy.Route
-	wellKnownRoutes  map[string]proxy.Route
-	mu               sync.RWMutex
-	onChange         func([]proxy.Route)
+	dockerRoutes    map[string]proxy.Route
+	processRoutes   map[string]proxy.Route
+	wellKnownRoutes map[string]proxy.Route
+	mu              sync.RWMutex
+	onChange        func([]proxy.Route)
 }
 
 func NewRouteRegistry() *RouteRegistry {
@@ -97,17 +98,18 @@ func (r *RouteRegistry) GetRoutes() []proxy.Route {
 
 func (r *RouteRegistry) getRoutesLocked() []proxy.Route {
 	merged := make(map[string]proxy.Route)
-	for k, v := range r.wellKnownRoutes {
-		merged[k] = v
-	}
-	for k, v := range r.dockerRoutes {
-		merged[k] = v
-	}
-	for k, v := range r.processRoutes {
-		merged[k] = v
-	}
+	maps.Copy(merged, r.wellKnownRoutes)
+	maps.Copy(merged, r.dockerRoutes)
+	maps.Copy(merged, r.processRoutes)
 
 	var routes []proxy.Route
+	routes = append(routes, proxy.Route{
+		Subdomain: "",
+		Host:      "127.0.0.1",
+		Port:      proxy.ServerPort,
+		PID:       0,
+		Source:    proxy.RouteSourceWellKnown,
+	})
 	for _, v := range merged {
 		routes = append(routes, v)
 	}

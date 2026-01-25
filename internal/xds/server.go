@@ -12,6 +12,7 @@ import (
 	routeservice "github.com/envoyproxy/go-control-plane/envoy/service/route/v3"
 	secretservice "github.com/envoyproxy/go-control-plane/envoy/service/secret/v3"
 	"github.com/envoyproxy/go-control-plane/pkg/cache/v3"
+	"github.com/envoyproxy/go-control-plane/pkg/log"
 	"github.com/envoyproxy/go-control-plane/pkg/server/v3"
 	"google.golang.org/grpc"
 )
@@ -26,7 +27,8 @@ type Server struct {
 }
 
 func NewServer() *Server {
-	snapshotCache := cache.NewSnapshotCache(false, cache.IDHash{}, nil)
+	log := log.NewDefaultLogger()
+	snapshotCache := cache.NewSnapshotCache(false, cache.IDHash{}, log)
 	srv := server.NewServer(context.Background(), snapshotCache, nil)
 
 	s := &Server{

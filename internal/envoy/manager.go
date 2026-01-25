@@ -13,16 +13,16 @@ import (
 )
 
 type Manager struct {
-	dataDir       string
-	xdsAddress    string
-	nodeID        string
-	cmd           *exec.Cmd
-	ctx           context.Context
-	cancel        context.CancelFunc
-	mu            sync.Mutex
-	restartDelay  time.Duration
-	configPath    string
-	shuttingDown  bool
+	dataDir      string
+	xdsAddress   string
+	nodeID       string
+	cmd          *exec.Cmd
+	ctx          context.Context
+	cancel       context.CancelFunc
+	mu           sync.Mutex
+	restartDelay time.Duration
+	configPath   string
+	shuttingDown bool
 }
 
 func NewManager(dataDir, xdsAddress, nodeID string) *Manager {
@@ -135,11 +135,11 @@ func (m *Manager) writeBootstrapConfig() error {
 			},
 			"lds_config": map[string]interface{}{
 				"resource_api_version": "V3",
-				"ads": map[string]interface{}{},
+				"ads":                  map[string]interface{}{},
 			},
 			"cds_config": map[string]interface{}{
 				"resource_api_version": "V3",
-				"ads": map[string]interface{}{},
+				"ads":                  map[string]interface{}{},
 			},
 		},
 		"static_resources": map[string]interface{}{

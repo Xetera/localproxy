@@ -3,7 +3,6 @@ package proxy
 import (
 	"bufio"
 	"context"
-	"fmt"
 	"log"
 	"os/exec"
 	"strconv"
@@ -170,7 +169,6 @@ func (lm *LogManager) traceProcess(ctx context.Context, key string, pid int) {
 			return
 		default:
 			line := scanner.Text()
-			fmt.Println(line)
 			buffer.Add(line)
 		}
 	}
