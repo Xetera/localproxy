@@ -54,6 +54,8 @@ func (m *CertManager) generateWildcardCert() error {
 		"-key-file", m.wildcardKeyPath,
 		"proxy.localhost",
 		"*.proxy.localhost",
+		"proxy.internal",
+		"*.proxy.internal",
 	)
 	cmd.Dir = m.certsDir
 	if err := cmd.Run(); err != nil {

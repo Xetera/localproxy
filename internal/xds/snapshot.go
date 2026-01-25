@@ -98,13 +98,17 @@ func (b *SnapshotBuilder) Build(routes []Route, certPath, keyPath string) (*cach
 	tcpListenerChains := make(map[int][]*listener.FilterChain)
 
 	for _, r := range routes {
-		var clusterName, sniDomain string
+		var clusterName string
+		var sniDomains []string
 		if r.Subdomain == "" {
 			clusterName = "cluster_root"
-			sniDomain = "proxy.localhost"
+			sniDomains = []string{"proxy.localhost", "proxy.internal"}
 		} else {
 			clusterName = fmt.Sprintf("cluster_%s", r.Subdomain)
-			sniDomain = fmt.Sprintf("%s.proxy.localhost", r.Subdomain)
+			sniDomains = []string{
+				fmt.Sprintf("%s.proxy.localhost", r.Subdomain),
+				fmt.Sprintf("%s.proxy.internal", r.Subdomain),
+			}
 		}
 
 		clusterType := cluster.Cluster_STATIC
@@ -152,7 +156,7 @@ func (b *SnapshotBuilder) Build(routes []Route, certPath, keyPath string) (*cach
 
 			tcpListenerChains[r.TCPPort] = append(tcpListenerChains[r.TCPPort], &listener.FilterChain{
 				FilterChainMatch: &listener.FilterChainMatch{
-					ServerNames: []string{sniDomain},
+					ServerNames: sniDomains,
 				},
 				TransportSocket: tlsTransportSocket,
 				Filters: []*listener.Filter{{
@@ -163,7 +167,7 @@ func (b *SnapshotBuilder) Build(routes []Route, certPath, keyPath string) (*cach
 		} else {
 			virtualHosts = append(virtualHosts, &route.VirtualHost{
 				Name:    fmt.Sprintf("vhost_%s", r.Subdomain),
-				Domains: []string{sniDomain},
+				Domains: sniDomains,
 				Routes: []*route.Route{{
 					Match: &route.RouteMatch{
 						PathSpecifier: &route.RouteMatch_Prefix{Prefix: "/"},
@@ -209,7 +213,7 @@ func (b *SnapshotBuilder) Build(routes []Route, certPath, keyPath string) (*cach
 
 		httpsFilterChains = append(httpsFilterChains, &listener.FilterChain{
 			FilterChainMatch: &listener.FilterChainMatch{
-				ServerNames: []string{"*.proxy.localhost", "proxy.localhost"},
+				ServerNames: []string{"*.proxy.localhost", "proxy.localhost", "*.proxy.internal", "proxy.internal"},
 			},
 			TransportSocket: tlsTransportSocket,
 			Filters: []*listener.Filter{{

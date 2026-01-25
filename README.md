@@ -31,6 +31,25 @@ curl https://project1.proxy.localhost
 
 Proxying traffic to docker containers works without exposing ports using `-p`.
 
+To allow reaching out to localproxy urls _from within_ containers, you need to use and map the alternative `.internal` tld to `host-gateway` using `--add-hosts`, since `.localhost` specifically only points to 127.0.0.1 as per its RFC.
+
+##### Using docker run
+
+```sh
+docker run --add-host=test.proxy.internal:host-gateway alpine/curl https://test.proxy.internal
+```
+
+##### Using docker-compose
+
+```yaml
+services:
+  curl:
+    image: alpine/curl
+    command: curl https://test.proxy.internal
+    extra_hosts:
+      - test.proxy.internal:host-gateway
+```
+
 #### Postgres
 
 ```sh

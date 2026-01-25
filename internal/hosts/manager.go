@@ -38,7 +38,11 @@ func (m *Manager) Update(subdomains []string) error {
 
 	var hostnames []string
 	for _, sub := range subdomains {
-		hostnames = append(hostnames, fmt.Sprintf("%s.proxy.localhost", sub))
+		if sub == "" {
+			hostnames = append(hostnames, "proxy.localhost", "proxy.internal")
+		} else {
+			hostnames = append(hostnames, fmt.Sprintf("%s.proxy.localhost", sub), fmt.Sprintf("%s.proxy.internal", sub))
+		}
 	}
 
 	if len(hostnames) > 0 {
@@ -74,5 +78,5 @@ func (m *Manager) Cleanup() error {
 }
 
 func isLocalhost(hostname string) bool {
-	return strings.HasSuffix(hostname, ".localhost")
+	return strings.HasSuffix(hostname, ".localhost") || strings.HasSuffix(hostname, ".internal")
 }
