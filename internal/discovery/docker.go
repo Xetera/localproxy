@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	LabelDomain  = "localproxy.domain"
+	LabelDomain  = "localproxy.subdomain"
 	LabelPort    = "localproxy.port"
 	LabelTCPPort = "localproxy.tcpport"
 )
