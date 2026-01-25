@@ -1,8 +1,10 @@
 # Localproxy
 
+`http://localhost:8080 -> https://project.proxy.localhost`
+
 ![](./showcase.jpg)
 
-Programming is both my job and my hobby, and I have the convenience of using the same laptop to do both. That means after work hours, I tend to close my text editor and open it back up to another project. At work, the webservers in our monorepo use ports 3000-3005. And because we do a lot of testing with databases, I often end up having postgres running on ports 5432, 5431, 5454, not knowing which instance exposes which port. At home, my own projects are an even bigger mess, running on 3030, 8080, 8081, 7000, you name it. I hate having to remember these numbers.
+Programming is both my job and my hobby, and I have the convenience of using the same laptop for both. At work, the webservers in our monorepo use ports 3000-3005. And because we do a lot of testing with databases, I often end up having postgres running on the standard 5432 but also weird ones like, 5431, 5454, not knowing which instance exposes which port. At home, my own projects are an even bigger mess, running on 3030, 8080, 8081, 7000, you name it. I hate having to remember these random numbers.
 
 Localproxy solves this problem for me. It runs envoy on port 80 and 443 with a self-signed certificate using [mkcert](https://github.com/FiloSottile/mkcert), and auto-discovers targets from both docker using `EXPOSE` fields and [labels](#docker-example-with-labels), and local processes listening to ports running directly under a given "projects" folder. To allow for non-browser tools to also function, the current running processes are also appended to `/etc/hosts` to make sure they point to 127.0.0.1, and are not resolved through external DNS. This is not already the default behavior on macos for some reason.
 
@@ -29,9 +31,13 @@ curl https://project1.proxy.localhost
 
 ### Docker example with labels
 
-Proxying traffic to docker containers works without exposing ports using `-p`.
+Proxying traffic to docker containers works without exposing ports using `-p`. Instead you can use the following labels to configure the proxy behavior:
 
-To allow reaching out to localproxy urls _from within_ containers, you need to use and map the alternative `.internal` tld to `host-gateway` using `--add-hosts`, since `.localhost` specifically only points to 127.0.0.1 as per its RFC.
+- `localproxy.subdomain` controls the [subdomain].proxy.internal domain
+- `localproxy.port` 443/80 -> $port (used for webservers)
+- `localproxy.tcpport` $tcpport -> $tcpport (used for for tcp servers that listen non non-web ports)
+
+To allow reaching out to localproxy urls _from within_ containers, you need to use and map the alternative `.internal` tld to `host-gateway` using `--add-hosts`. `.localhost` specifically only points to 127.0.0.1 as per its RFC, which creates problems
 
 ##### Using docker run
 
