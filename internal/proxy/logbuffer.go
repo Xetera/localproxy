@@ -103,11 +103,11 @@ func (lm *LogManager) StartTracing(key string, pid int) {
 		return
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	_, cancel := context.WithCancel(context.Background())
 	lm.tracers[key] = cancel
 	lm.tracerMu.Unlock()
 
-	go lm.traceProcess(ctx, key, pid)
+	// go lm.traceProcess(ctx, key, pid)
 }
 
 func (lm *LogManager) StartDockerLogs(containerID string) {
