@@ -28,6 +28,8 @@ jobs:
           go-version-file: go.mod
 
       - name: Build
+        env:
+          CGO_ENABLED: 0
         run: |
           go build -o bin/localproxy ./cmd/localproxy
           go build -o bin/localproxyd ./cmd/localproxyd
