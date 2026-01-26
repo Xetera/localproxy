@@ -35,6 +35,8 @@ jobs:
           go build -o bin/localproxyd ./cmd/localproxyd
 
       - name: Test
+        env:
+          CGO_ENABLED: 0
         run: go test -v ./...
 
   lint:

@@ -35,20 +35,6 @@ import (
 	"unsafe"
 )
 
-type ListeningProcess struct {
-	PID       int
-	Port      int
-	Subdomain string
-	Cwd       string
-	Disabled  bool
-}
-
-type WellKnownProcess struct {
-	PID       int
-	Port      int
-	Subdomain string
-}
-
 type ProcessWatcher struct {
 	basePath          string
 	onChange          func([]ListeningProcess)
