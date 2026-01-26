@@ -7,8 +7,10 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
+	"github.com/spf13/pflag"
 	"github.com/xetera/localproxy/internal/certs"
 	"github.com/xetera/localproxy/internal/discovery"
 	"github.com/xetera/localproxy/internal/envoy"
@@ -20,16 +22,23 @@ import (
 
 const defaultBasePath = "/Users/xetera"
 
+var watchPaths []string
+var logLevel string
+
+func init() {
+	pflag.StringArrayVar(&watchPaths, "watch", []string{}, "Paths to watch for processes (can be specified multiple times)")
+	pflag.StringVar(&logLevel, "log-level", "info", "Envoy log level (trace, debug, info, warning, error, critical, off)")
+	pflag.Parse()
+}
+
 func main() {
-	fmt.Println("starting daemon...")
+	fmt.Println("Starting localproxy daemon...")
 	dataDir := dataDir()
-	fmt.Println("data dir:", dataDir)
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		log.Fatalf("failed to create data dir: %v", err)
 	}
 
 	logFile, err := os.OpenFile(filepath.Join(dataDir, "daemon.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	fmt.Println("logfile", logFile)
 	if err != nil {
 		log.Fatalf("failed to open log file: %v", err)
 	}
@@ -54,7 +63,7 @@ func main() {
 	}
 	log.Printf("xds server listening on :18000")
 
-	envoyMgr := envoy.NewManager(dataDir, "127.0.0.1:18000", xdsServer.NodeID())
+	envoyMgr := envoy.NewManager(dataDir, "127.0.0.1:18000", xdsServer.NodeID(), logLevel)
 	if err := envoyMgr.Start(); err != nil {
 		log.Fatalf("failed to start envoy: %v", err)
 	}
@@ -122,12 +131,16 @@ func main() {
 		}
 	}
 
-	basePath := os.Getenv("LOCALPROXY_BASE_PATH")
-	if basePath == "" {
-		basePath = defaultBasePath
+	basePaths := watchPaths
+	if len(basePaths) == 0 {
+		if envPath := os.Getenv("LOCALPROXY_BASE_PATH"); envPath != "" {
+			basePaths = strings.Split(envPath, ":")
+		} else {
+			basePaths = []string{defaultBasePath}
+		}
 	}
 
-	processWatcher, err := discovery.NewProcessWatcher(basePath)
+	processWatcher, err := discovery.NewProcessWatcher(basePaths)
 	if err != nil {
 		log.Printf("warning: process watcher disabled: %v", err)
 	} else {

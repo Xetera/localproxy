@@ -29,7 +29,7 @@ type WellKnownProcess struct {
 }
 
 type ProcessWatcher struct {
-	basePath            string
+	basePaths           []string
 	onChange            func([]ListeningProcess)
 	onWellKnownChange   func([]WellKnownProcess)
 	ctx                 context.Context
@@ -39,16 +39,20 @@ type ProcessWatcher struct {
 	currentWellKnown    map[int]WellKnownProcess
 }
 
-func NewProcessWatcher(basePath string) (*ProcessWatcher, error) {
+func NewProcessWatcher(basePaths []string) (*ProcessWatcher, error) {
 	ctx, cancel := context.WithCancel(context.Background())
-	absPath, err := filepath.Abs(basePath)
-	if err != nil {
-		cancel()
-		return nil, err
+	absPaths := make([]string, 0, len(basePaths))
+	for _, p := range basePaths {
+		absPath, err := filepath.Abs(p)
+		if err != nil {
+			cancel()
+			return nil, err
+		}
+		absPaths = append(absPaths, absPath)
 	}
 
 	return &ProcessWatcher{
-		basePath:         absPath,
+		basePaths:        absPaths,
 		ctx:              ctx,
 		cancel:           cancel,
 		current:          make(map[int]ListeningProcess),
@@ -193,7 +197,15 @@ func (w *ProcessWatcher) scan() ([]ListeningProcess, []WellKnownProcess, error) 
 			continue
 		}
 
-		if !strings.HasPrefix(cwd, w.basePath) {
+		var matchedBasePath string
+		for _, basePath := range w.basePaths {
+			if strings.HasPrefix(cwd, basePath) {
+				matchedBasePath = basePath
+				break
+			}
+		}
+
+		if matchedBasePath == "" {
 			if info, ok := WellKnownPorts[port]; ok && !usedPorts[port] {
 				wellKnownResults = append(wellKnownResults, WellKnownProcess{
 					PID:       pid,
@@ -216,7 +228,7 @@ func (w *ProcessWatcher) scan() ([]ListeningProcess, []WellKnownProcess, error) 
 			continue
 		}
 
-		rel, err := filepath.Rel(w.basePath, cwd)
+		rel, err := filepath.Rel(matchedBasePath, cwd)
 		if err != nil {
 			continue
 		}

@@ -16,6 +16,7 @@ type Manager struct {
 	dataDir      string
 	xdsAddress   string
 	nodeID       string
+	logLevel     string
 	cmd          *exec.Cmd
 	ctx          context.Context
 	cancel       context.CancelFunc
@@ -25,12 +26,16 @@ type Manager struct {
 	shuttingDown bool
 }
 
-func NewManager(dataDir, xdsAddress, nodeID string) *Manager {
+func NewManager(dataDir, xdsAddress, nodeID, logLevel string) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
+	if logLevel == "" {
+		logLevel = "info"
+	}
 	return &Manager{
 		dataDir:      dataDir,
 		xdsAddress:   xdsAddress,
 		nodeID:       nodeID,
+		logLevel:     logLevel,
 		ctx:          ctx,
 		cancel:       cancel,
 		restartDelay: 2 * time.Second,
@@ -103,7 +108,7 @@ func (m *Manager) runLoop() {
 
 func (m *Manager) spawn() error {
 	m.mu.Lock()
-	cmd := exec.CommandContext(m.ctx, "envoy", "-c", m.configPath, "-l", "debug")
+	cmd := exec.CommandContext(m.ctx, "envoy", "-c", m.configPath, "-l", m.logLevel)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	m.cmd = cmd

@@ -206,11 +206,11 @@ func (w *ProcessWatcher) scan() ([]ListeningProcess, []WellKnownProcess, error) 
 		}
 
 		if cwd == "" {
-			if subdomain, ok := WellKnownPorts[port]; ok && !usedPorts[port] {
+			if wk, ok := WellKnownPorts[port]; ok && !usedPorts[port] {
 				wellKnownResults = append(wellKnownResults, WellKnownProcess{
 					PID:       pid,
 					Port:      port,
-					Subdomain: subdomain,
+					Subdomain: wk.Subdomain,
 				})
 				usedPorts[port] = true
 			}
@@ -218,11 +218,11 @@ func (w *ProcessWatcher) scan() ([]ListeningProcess, []WellKnownProcess, error) 
 		}
 
 		if !strings.HasPrefix(cwd, w.basePath) {
-			if subdomain, ok := WellKnownPorts[port]; ok && !usedPorts[port] {
+			if wk, ok := WellKnownPorts[port]; ok && !usedPorts[port] {
 				wellKnownResults = append(wellKnownResults, WellKnownProcess{
 					PID:       pid,
 					Port:      port,
-					Subdomain: subdomain,
+					Subdomain: wk.Subdomain,
 				})
 				usedPorts[port] = true
 			}

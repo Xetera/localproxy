@@ -64,7 +64,7 @@ docker run --name postgres -l localproxy.tcpport=5432 -e POSTGRES_HOST_AUTH_METH
 
 Two requirements for connection:
 
-1. `sslmode` has to be require to not attempt a plaintext connection
+1. `sslmode` has to be `require` to not attempt a plaintext connection
 2. `sslnegotiation` has to be `direct` to use TLS instead of STARTTLS
 
 ```sh
