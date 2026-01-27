@@ -14,8 +14,8 @@ import (
 	tlsinspector "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/listener/tls_inspector/v3"
 	hcm "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/http_connection_manager/v3"
 	tcpproxy "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/tcp_proxy/v3"
-	tls "github.com/envoyproxy/go-control-plane/envoy/extensions/transport_sockets/tls/v3"
 	quic "github.com/envoyproxy/go-control-plane/envoy/extensions/transport_sockets/quic/v3"
+	tls "github.com/envoyproxy/go-control-plane/envoy/extensions/transport_sockets/tls/v3"
 	"github.com/envoyproxy/go-control-plane/pkg/cache/types"
 	"github.com/envoyproxy/go-control-plane/pkg/cache/v3"
 	"github.com/envoyproxy/go-control-plane/pkg/resource/v3"
@@ -122,6 +122,7 @@ func (b *SnapshotBuilder) Build(routes []Route, certPath, keyPath string) (*cach
 	routerFilter, _ := anypb.New(&router.Router{})
 
 	tcpListenerChains := make(map[int][]*listener.FilterChain)
+	usedPorts := make(map[int]bool)
 
 	for _, r := range routes {
 		var clusterName string
@@ -172,6 +173,12 @@ func (b *SnapshotBuilder) Build(routes []Route, certPath, keyPath string) (*cach
 		})
 
 		if r.Protocol == ProtocolTCP && r.TCPPort > 0 {
+			if usedPorts[r.TCPPort] {
+				continue
+			}
+			if isPortInUse(r.TCPPort) {
+				continue
+			}
 			tcpProxyConfig := &tcpproxy.TcpProxy{
 				StatPrefix: fmt.Sprintf("tcp_%s", r.Subdomain),
 				ClusterSpecifier: &tcpproxy.TcpProxy_Cluster{
@@ -190,6 +197,7 @@ func (b *SnapshotBuilder) Build(routes []Route, certPath, keyPath string) (*cach
 					ConfigType: &listener.Filter_TypedConfig{TypedConfig: tcpProxyAny},
 				}},
 			})
+			usedPorts[r.TCPPort] = true
 		} else {
 			virtualHosts = append(virtualHosts, &route.VirtualHost{
 				Name:    fmt.Sprintf("vhost_%s", r.Subdomain),
@@ -417,4 +425,13 @@ func (b *SnapshotBuilder) Build(routes []Route, certPath, keyPath string) (*cach
 
 func isIPAddress(host string) bool {
 	return net.ParseIP(host) != nil
+}
+
+func isPortInUse(port int) bool {
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	if err != nil {
+		return true
+	}
+	listener.Close()
+	return false
 }
