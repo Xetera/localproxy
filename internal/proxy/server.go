@@ -151,7 +151,7 @@ func (s *DashboardServer) serveDashboard(w http.ResponseWriter, r *http.Request)
 			Route:      route,
 			RecentLogs: []string{},
 		}
-		if route.Source == RouteSourceDocker && route.DockerContainerID != "" {
+		if route.Source == discovery.RouteSourceDocker && route.DockerContainerID != "" {
 			buffer := s.logManager.GetBufferByContainerID(route.DockerContainerID)
 			routeWithLogs.RecentLogs = buffer.GetLines()
 		} else if route.PID > 0 {
@@ -161,7 +161,7 @@ func (s *DashboardServer) serveDashboard(w http.ResponseWriter, r *http.Request)
 
 		if route.Disabled {
 			disabledRoutes = append(disabledRoutes, routeWithLogs)
-		} else if route.Source == RouteSourceWellKnown {
+		} else if route.Source == discovery.RouteSourceWellKnown {
 			wellKnownRoutes = append(wellKnownRoutes, routeWithLogs)
 		} else {
 			enabledRoutes = append(enabledRoutes, routeWithLogs)
@@ -171,14 +171,14 @@ func (s *DashboardServer) serveDashboard(w http.ResponseWriter, r *http.Request)
 
 	var dockerRoutes, processRoutes []RouteWithLogs
 	for _, r := range enabledRoutes {
-		if r.Source == RouteSourceDocker {
+		if r.Source == discovery.RouteSourceDocker {
 			dockerRoutes = append(dockerRoutes, r)
 		} else {
 			processRoutes = append(processRoutes, r)
 		}
 	}
 	for _, r := range disabledRoutes {
-		if r.Source == RouteSourceProcess {
+		if r.Source == discovery.RouteSourceProcess {
 			processRoutes = append(processRoutes, r)
 		}
 	}
@@ -194,7 +194,7 @@ func (s *DashboardServer) serveDashboard(w http.ResponseWriter, r *http.Request)
 	})
 	var otherDisabledRoutes []RouteWithLogs
 	for _, r := range disabledRoutes {
-		if r.Source != RouteSourceProcess {
+		if r.Source != discovery.RouteSourceProcess {
 			otherDisabledRoutes = append(otherDisabledRoutes, r)
 		}
 	}
@@ -326,7 +326,7 @@ func (s *DashboardServer) serveLogsPreview(w http.ResponseWriter, r *http.Reques
 	logsMap := make(map[string][]string)
 	for _, route := range s.routes {
 		var buffer *LogBuffer
-		if route.Source == RouteSourceDocker && route.DockerContainerID != "" {
+		if route.Source == discovery.RouteSourceDocker && route.DockerContainerID != "" {
 			buffer = s.logManager.GetBufferByContainerID(route.DockerContainerID)
 		} else if route.PID > 0 {
 			buffer = s.logManager.GetBufferByPID(route.PID)
@@ -405,7 +405,7 @@ func (s *DashboardServer) streamLogs(w http.ResponseWriter, r *http.Request, sub
 	var reader io.ReadCloser
 	var err error
 
-	if route.Source == RouteSourceDocker && route.DockerContainerID != "" {
+	if route.Source == discovery.RouteSourceDocker && route.DockerContainerID != "" {
 		if s.logManager.dockerClient == nil {
 			http.Error(w, "docker client not available", http.StatusInternalServerError)
 			return
@@ -453,7 +453,7 @@ func (s *DashboardServer) streamLogs(w http.ResponseWriter, r *http.Request, sub
 	scanner := bufio.NewScanner(reader)
 	for scanner.Scan() {
 		line := scanner.Text()
-		if route.Source == RouteSourceDocker && len(line) > 8 {
+		if route.Source == discovery.RouteSourceDocker && len(line) > 8 {
 			line = line[8:]
 		}
 		line = strings.TrimSpace(line)

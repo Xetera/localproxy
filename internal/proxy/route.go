@@ -1,12 +1,6 @@
 package proxy
 
-type RouteSource string
-
-const (
-	RouteSourceProcess   RouteSource = "process"
-	RouteSourceDocker    RouteSource = "docker"
-	RouteSourceWellKnown RouteSource = "wellknown"
-)
+import "github.com/xetera/localproxy/internal/discovery"
 
 type Route struct {
 	Subdomain          string
@@ -16,7 +10,7 @@ type Route struct {
 	PID                int
 	Cwd                string
 	Disabled           bool
-	Source             RouteSource
+	Source             discovery.RouteSource
 	DockerHasAutoName  bool
 	DockerContainerID  string
 	NeedsCustomMapping bool

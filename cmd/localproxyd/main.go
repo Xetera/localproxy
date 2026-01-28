@@ -133,45 +133,31 @@ func main() {
 	dashboardServer.SetBasePaths(append(basePaths, homeDir))
 
 	notifier := notification.NewNotifier()
+	seenBackends := make(map[string]bool)
+	watcherStarted := false
+
 	processWatcher, err := discovery.NewProcessWatcher(basePaths)
 	if err != nil {
 		log.Printf("warning: process watcher disabled: %v", err)
 	} else {
-		seenBackends := make(map[string]bool)
-		watcherStarted := false
+		processWatcher.SetOnChange(func(services []discovery.DiscoveredService) {
+			log.Printf("processes changed: %d", len(services))
+			routeRegistry.UpdateServices(discovery.RouteSourceProcess, filterBySource(services, discovery.RouteSourceProcess))
+			routeRegistry.UpdateServices(discovery.RouteSourceWellKnown, filterBySource(services, discovery.RouteSourceWellKnown))
 
-		processWatcher.SetOnChange(func(processes []discovery.ListeningProcess) {
-			log.Printf("processes changed: %d", len(processes))
-			routeRegistry.UpdateProcesses(processes)
-
-			for _, p := range processes {
-				if !seenBackends[p.Subdomain] {
-					if watcherStarted && !p.Disabled {
-						log.Printf("sending notification for backend: %s", p.Subdomain)
-						if err := notifier.NotifyBackend(p.Subdomain, notification.IsDockerBackend(p.Subdomain, p.Cwd)); err != nil {
+			for _, s := range services {
+				if !seenBackends[s.Subdomain] {
+					if watcherStarted && (s.Process == nil || !s.Process.Disabled) {
+						cwd := ""
+						if s.Process != nil {
+							cwd = s.Process.Cwd
+						}
+						log.Printf("sending notification for backend: %s", s.Subdomain)
+						if err := notifier.NotifyBackend(s.Subdomain, notification.IsDockerBackend(s.Subdomain, cwd)); err != nil {
 							log.Printf("failed to send notification: %v", err)
 						}
 					}
-					seenBackends[p.Subdomain] = true
-				}
-			}
-		})
-		processWatcher.SetOnWellKnownChange(func(processes []discovery.WellKnownProcess) {
-			log.Printf("well-known changed: %d", len(processes))
-			for _, p := range processes {
-				log.Printf("  well-known: %s -> :%d (pid %d)", p.Subdomain, p.Port, p.PID)
-			}
-			routeRegistry.UpdateWellKnownPorts(processes)
-
-			for _, p := range processes {
-				if !seenBackends[p.Subdomain] {
-					if watcherStarted {
-						log.Printf("sending notification for well-known backend: %s", p.Subdomain)
-						if err := notifier.NotifyBackend(p.Subdomain, notification.IsDockerBackend(p.Subdomain, "")); err != nil {
-							log.Printf("failed to send notification: %v", err)
-						}
-					}
-					seenBackends[p.Subdomain] = true
+					seenBackends[s.Subdomain] = true
 				}
 			}
 		})
@@ -186,28 +172,31 @@ func main() {
 	if err != nil {
 		log.Printf("warning: docker watcher disabled: %v", err)
 	} else {
-		dockerWatcher.SetOnChange(func(containers []discovery.DockerContainer) {
-			log.Printf("docker containers changed: %d", len(containers))
-			routeRegistry.UpdateDockerContainers(containers)
+		dockerWatcher.SetOnChange(func(services []discovery.DiscoveredService) {
+			log.Printf("docker containers changed: %d", len(services))
+			routeRegistry.UpdateServices(discovery.RouteSourceDocker, services)
 
 			if processWatcher != nil {
-				ports := make([]int, 0, len(containers))
-				for _, c := range containers {
-					ports = append(ports, c.Port)
+				ports := make([]int, 0, len(services))
+				for _, s := range services {
+					ports = append(ports, s.Port)
 				}
-
 				processWatcher.SetDockerPorts(ports)
 			}
 		})
-		dockerWatcher.SetOnHealthy(func(dc discovery.DockerContainer) {
-			fmt.Println("TARGET IS HEALTHy", dc.Name)
+		dockerWatcher.SetOnHealthy(func(svc discovery.DiscoveredService) {
+			fmt.Println("TARGET IS HEALTHy", svc.Subdomain)
 			if processWatcher != nil {
 				targets := make([]discovery.ScanTarget, 0)
 				targets = append(targets, discovery.ScanTarget{
-					IP:   dc.IP,
-					Port: dc.Port,
+					IP:   svc.IP,
+					Port: svc.Port,
 				})
-				dockerWatcher.WaitForDiscovery(dc.ID, func() bool {
+				containerID := ""
+				if svc.Docker != nil {
+					containerID = svc.Docker.ID
+				}
+				dockerWatcher.WaitForDiscovery(containerID, func() bool {
 					services, err := discovery.DiscoverServices(context.Background(), targets)
 					if err != nil {
 						return false
@@ -216,7 +205,6 @@ func main() {
 					return len(services) > 0
 				})
 			}
-
 		})
 		if err := dockerWatcher.Start(); err != nil {
 			log.Printf("warning: failed to start docker watcher: %v", err)
@@ -254,6 +242,16 @@ func main() {
 	}
 
 	log.Println("daemon stopped")
+}
+
+func filterBySource(services []discovery.DiscoveredService, source discovery.RouteSource) []discovery.DiscoveredService {
+	var result []discovery.DiscoveredService
+	for _, s := range services {
+		if s.Source == source {
+			result = append(result, s)
+		}
+	}
+	return result
 }
 
 func dataDir() string {

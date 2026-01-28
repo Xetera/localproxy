@@ -11,6 +11,7 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
+	"github.com/xetera/localproxy/internal/discovery"
 )
 
 type LogBuffer struct {
@@ -215,7 +216,7 @@ func (lm *LogManager) UpdateRoutes(routes []Route) {
 	activeKeys := make(map[string]bool)
 
 	for _, route := range routes {
-		if route.Source == RouteSourceDocker && route.DockerContainerID != "" {
+		if route.Source == discovery.RouteSourceDocker && route.DockerContainerID != "" {
 			key := "docker:" + route.DockerContainerID
 			activeKeys[key] = true
 			lm.StartDockerLogs(route.DockerContainerID)

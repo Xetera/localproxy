@@ -3,7 +3,6 @@ package registry
 import (
 	"fmt"
 	"log"
-	"maps"
 	"sync"
 
 	"github.com/xetera/localproxy/internal/discovery"
@@ -11,18 +10,14 @@ import (
 )
 
 type RouteRegistry struct {
-	dockerRoutes    map[string]proxy.Route
-	processRoutes   map[string]proxy.Route
-	wellKnownRoutes map[string]proxy.Route
-	mu              sync.RWMutex
-	onChange        func([]proxy.Route)
+	services map[string]discovery.DiscoveredService
+	mu       sync.RWMutex
+	onChange func([]proxy.Route)
 }
 
 func NewRouteRegistry() *RouteRegistry {
 	return &RouteRegistry{
-		dockerRoutes:    make(map[string]proxy.Route),
-		processRoutes:   make(map[string]proxy.Route),
-		wellKnownRoutes: make(map[string]proxy.Route),
+		services: make(map[string]discovery.DiscoveredService),
 	}
 }
 
@@ -30,71 +25,48 @@ func (r *RouteRegistry) SetOnChange(fn func([]proxy.Route)) {
 	r.onChange = fn
 }
 
-func (r *RouteRegistry) UpdateDockerContainers(containers []discovery.DockerContainer) {
+func (r *RouteRegistry) UpdateServices(source discovery.RouteSource, services []discovery.DiscoveredService) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	r.dockerRoutes = make(map[string]proxy.Route)
-	for _, c := range containers {
-		route := proxy.Route{
-			Subdomain:         c.Subdomain,
-			Host:              c.IP,
-			Port:              c.Port,
-			TCPPort:           c.TCPPort,
-			Source:            proxy.RouteSourceDocker,
-			DockerHasAutoName: !c.HasCustomName,
-			DockerContainerID: c.ID,
+	for key, svc := range r.services {
+		if svc.Source == source {
+			delete(r.services, key)
 		}
-		log.Printf("registry: docker route %s - HasCustomName=%v, DockerHasAutoName=%v, TCPPort=%d", c.Subdomain, c.HasCustomName, route.DockerHasAutoName, c.TCPPort)
-		r.dockerRoutes[c.Subdomain] = route
+	}
+
+	for _, svc := range services {
+		subdomain := svc.Subdomain
+		if svc.Process != nil && svc.Process.NeedsCustomMapping {
+			subdomain = fmt.Sprintf("pid-%d", svc.Process.PID)
+		}
+
+		existing, exists := r.services[subdomain]
+		if exists && r.priority(existing.Source) > r.priority(svc.Source) {
+			continue
+		}
+
+		svc.Subdomain = subdomain
+		r.services[subdomain] = svc
+		log.Printf("registry: %s route %s -> %s:%d", svc.Source, subdomain, svc.IP, svc.Port)
 	}
 
 	r.notifyChange()
 }
 
-func (r *RouteRegistry) UpdateProcesses(processes []discovery.ListeningProcess) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	r.processRoutes = make(map[string]proxy.Route)
-	for _, p := range processes {
-		subdomain := p.Subdomain
-		if p.NeedsCustomMapping {
-			subdomain = fmt.Sprintf("pid-%d", p.PID)
-		}
-		r.processRoutes[subdomain] = proxy.Route{
-			Subdomain:          subdomain,
-			Host:               "127.0.0.1",
-			Port:               p.Port,
-			PID:                p.PID,
-			Cwd:                p.Cwd,
-			Disabled:           p.Disabled,
-			Source:             proxy.RouteSourceProcess,
-			NeedsCustomMapping: p.NeedsCustomMapping,
-		}
+func (r *RouteRegistry) priority(source discovery.RouteSource) int {
+	switch source {
+	case discovery.RouteSourceFile:
+		return 4
+	case discovery.RouteSourceProcess:
+		return 3
+	case discovery.RouteSourceDocker:
+		return 2
+	case discovery.RouteSourceWellKnown:
+		return 1
+	default:
+		return 0
 	}
-
-	r.notifyChange()
-}
-
-func (r *RouteRegistry) UpdateWellKnownPorts(ports []discovery.WellKnownProcess) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	r.wellKnownRoutes = make(map[string]proxy.Route)
-	for _, p := range ports {
-		r.wellKnownRoutes[p.Subdomain] = proxy.Route{
-			Subdomain: p.Subdomain,
-			Host:      "127.0.0.1",
-			Port:      p.Port,
-			TCPPort:   p.TCPPort,
-			PID:       p.PID,
-			Source:    proxy.RouteSourceWellKnown,
-			IsDocker:  p.IsDocker,
-		}
-	}
-
-	r.notifyChange()
 }
 
 func (r *RouteRegistry) GetRoutes() []proxy.Route {
@@ -104,22 +76,40 @@ func (r *RouteRegistry) GetRoutes() []proxy.Route {
 }
 
 func (r *RouteRegistry) getRoutesLocked() []proxy.Route {
-	merged := make(map[string]proxy.Route)
-	maps.Copy(merged, r.wellKnownRoutes)
-	maps.Copy(merged, r.dockerRoutes)
-	maps.Copy(merged, r.processRoutes)
-
 	var routes []proxy.Route
 	routes = append(routes, proxy.Route{
 		Subdomain: "",
 		Host:      "127.0.0.1",
 		Port:      proxy.ServerPort,
 		PID:       0,
-		Source:    proxy.RouteSourceWellKnown,
+		Source:    discovery.RouteSourceWellKnown,
 	})
-	for _, v := range merged {
-		routes = append(routes, v)
+
+	for _, svc := range r.services {
+		route := proxy.Route{
+			Subdomain: svc.Subdomain,
+			Host:      svc.IP,
+			Port:      svc.Port,
+			TCPPort:   svc.TCPPort,
+			Source:    svc.Source,
+		}
+
+		if svc.Process != nil {
+			route.PID = svc.Process.PID
+			route.Cwd = svc.Process.Cwd
+			route.Disabled = svc.Process.Disabled
+			route.NeedsCustomMapping = svc.Process.NeedsCustomMapping
+			route.IsDocker = svc.Process.IsDocker
+		}
+
+		if svc.Docker != nil {
+			route.DockerContainerID = svc.Docker.ID
+			route.DockerHasAutoName = !svc.Docker.HasCustomName
+		}
+
+		routes = append(routes, route)
 	}
+
 	return routes
 }
 

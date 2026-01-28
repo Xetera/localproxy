@@ -9,19 +9,12 @@ import (
 	"github.com/xetera/localproxy/internal/config"
 )
 
-type FileProject struct {
-	Path      string
-	Name      string
-	Subdomain string
-	Port      int
-}
-
 type FilesystemWatcher struct {
-	watcher   *fsnotify.Watcher
-	paths     map[string]bool
-	mu        sync.RWMutex
-	onChange  func([]FileProject)
-	done      chan struct{}
+	watcher  *fsnotify.Watcher
+	paths    map[string]bool
+	mu       sync.RWMutex
+	onChange func([]DiscoveredService)
+	done     chan struct{}
 }
 
 func NewFilesystemWatcher() (*FilesystemWatcher, error) {
@@ -37,7 +30,7 @@ func NewFilesystemWatcher() (*FilesystemWatcher, error) {
 	}, nil
 }
 
-func (w *FilesystemWatcher) SetOnChange(fn func([]FileProject)) {
+func (w *FilesystemWatcher) SetOnChange(fn func([]DiscoveredService)) {
 	w.onChange = fn
 }
 
@@ -119,25 +112,29 @@ func (w *FilesystemWatcher) notifyChange() {
 	w.onChange(projects)
 }
 
-func (w *FilesystemWatcher) ListProjects() []FileProject {
+func (w *FilesystemWatcher) ListProjects() []DiscoveredService {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
-	var projects []FileProject
+	var services []DiscoveredService
 	for path := range w.paths {
 		cfg, err := config.LoadConfig(path)
 		if err != nil {
 			continue
 		}
 
-		projects = append(projects, FileProject{
-			Path:      path,
-			Name:      cfg.Name,
+		services = append(services, DiscoveredService{
 			Subdomain: cfg.Subdomain,
 			Port:      cfg.Port,
+			IP:        "127.0.0.1",
+			Source:    RouteSourceFile,
+			File: &FileInfo{
+				Path: path,
+				Name: cfg.Name,
+			},
 		})
 	}
-	return projects
+	return services
 }
 
 func (w *FilesystemWatcher) GetPaths() []string {

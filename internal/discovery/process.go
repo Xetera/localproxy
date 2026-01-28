@@ -15,15 +15,13 @@ type portEntry struct {
 }
 
 type ProcessWatcher struct {
-	basePaths         []string
-	onChange          func([]ListeningProcess)
-	onWellKnownChange func([]WellKnownProcess)
-	ctx               context.Context
-	cancel            context.CancelFunc
-	mu                sync.RWMutex
-	current           map[int]ListeningProcess
-	currentWellKnown  map[int]WellKnownProcess
-	dockerPorts       map[int]bool
+	basePaths   []string
+	onChange    func([]DiscoveredService)
+	ctx         context.Context
+	cancel      context.CancelFunc
+	mu          sync.RWMutex
+	current     map[int]DiscoveredService
+	dockerPorts map[int]bool
 }
 
 func NewProcessWatcher(basePaths []string) (*ProcessWatcher, error) {
@@ -39,21 +37,16 @@ func NewProcessWatcher(basePaths []string) (*ProcessWatcher, error) {
 	}
 
 	return &ProcessWatcher{
-		basePaths:        absPaths,
-		ctx:              ctx,
-		cancel:           cancel,
-		current:          make(map[int]ListeningProcess),
-		currentWellKnown: make(map[int]WellKnownProcess),
-		dockerPorts:      make(map[int]bool),
+		basePaths:   absPaths,
+		ctx:         ctx,
+		cancel:      cancel,
+		current:     make(map[int]DiscoveredService),
+		dockerPorts: make(map[int]bool),
 	}, nil
 }
 
-func (w *ProcessWatcher) SetOnChange(fn func([]ListeningProcess)) {
+func (w *ProcessWatcher) SetOnChange(fn func([]DiscoveredService)) {
 	w.onChange = fn
-}
-
-func (w *ProcessWatcher) SetOnWellKnownChange(fn func([]WellKnownProcess)) {
-	w.onWellKnownChange = fn
 }
 
 func (w *ProcessWatcher) SetDockerPorts(ports []int) {
@@ -66,38 +59,30 @@ func (w *ProcessWatcher) SetDockerPorts(ports []int) {
 }
 
 func (w *ProcessWatcher) Start() error {
-	processes, wellKnown, err := w.scan()
+	services, err := w.scan()
 	if err != nil {
 		return err
 	}
 
 	w.mu.Lock()
-	w.current = make(map[int]ListeningProcess)
-	for _, p := range processes {
-		w.current[p.PID] = p
-	}
-	w.currentWellKnown = make(map[int]WellKnownProcess)
-	for _, p := range wellKnown {
-		w.currentWellKnown[p.PID] = p
+	w.current = make(map[int]DiscoveredService)
+	for _, s := range services {
+		if s.Process != nil {
+			w.current[s.Process.PID] = s
+		}
 	}
 	w.mu.Unlock()
 
-	initialTargets := make([]ScanTarget, 0, len(processes)+len(wellKnown))
-	for _, p := range processes {
-		initialTargets = append(initialTargets, ScanTarget{IP: p.IP, Port: p.Port})
-	}
-	for _, p := range wellKnown {
-		initialTargets = append(initialTargets, ScanTarget{IP: p.IP, Port: p.Port})
+	initialTargets := make([]ScanTarget, 0, len(services))
+	for _, s := range services {
+		initialTargets = append(initialTargets, ScanTarget{IP: s.IP, Port: s.Port})
 	}
 	if len(initialTargets) > 0 {
 		w.discoverNewServices(initialTargets)
 	}
 
 	if w.onChange != nil {
-		w.onChange(processes)
-	}
-	if w.onWellKnownChange != nil {
-		w.onWellKnownChange(wellKnown)
+		w.onChange(services)
 	}
 
 	go w.watchLoop()
@@ -117,58 +102,42 @@ func (w *ProcessWatcher) watchLoop() {
 		case <-w.ctx.Done():
 			return
 		case <-ticker.C:
-			processes, wellKnown, err := w.scan()
+			services, err := w.scan()
 			if err != nil {
 				continue
 			}
 
 			w.mu.Lock()
-			changed := len(processes) != len(w.current)
+			changed := len(services) != len(w.current)
 			var newTargets []ScanTarget
 			if !changed {
-				for _, p := range processes {
-					if existing, ok := w.current[p.PID]; !ok || existing.Port != p.Port {
+				for _, s := range services {
+					if s.Process == nil {
+						continue
+					}
+					if existing, ok := w.current[s.Process.PID]; !ok || existing.Port != s.Port {
 						changed = true
 						break
 					}
 				}
 			}
 			if changed {
-				for _, p := range processes {
-					if _, ok := w.current[p.PID]; !ok {
-						newTargets = append(newTargets, ScanTarget{IP: p.IP, Port: p.Port})
+				for _, s := range services {
+					if s.Process == nil {
+						continue
 					}
-				}
-			}
-
-			wellKnownChanged := len(wellKnown) != len(w.currentWellKnown)
-			if !wellKnownChanged {
-				for _, p := range wellKnown {
-					if existing, ok := w.currentWellKnown[p.PID]; !ok || existing.Port != p.Port {
-						wellKnownChanged = true
-						break
-					}
-				}
-			}
-			if wellKnownChanged {
-				for _, p := range wellKnown {
-					if _, ok := w.currentWellKnown[p.PID]; !ok {
-						newTargets = append(newTargets, ScanTarget{IP: p.IP, Port: p.Port})
+					if _, ok := w.current[s.Process.PID]; !ok {
+						newTargets = append(newTargets, ScanTarget{IP: s.IP, Port: s.Port})
 					}
 				}
 			}
 
 			if changed {
-				w.current = make(map[int]ListeningProcess)
-				for _, p := range processes {
-					w.current[p.PID] = p
-				}
-			}
-
-			if wellKnownChanged {
-				w.currentWellKnown = make(map[int]WellKnownProcess)
-				for _, p := range wellKnown {
-					w.currentWellKnown[p.PID] = p
+				w.current = make(map[int]DiscoveredService)
+				for _, s := range services {
+					if s.Process != nil {
+						w.current[s.Process.PID] = s
+					}
 				}
 			}
 
@@ -179,19 +148,16 @@ func (w *ProcessWatcher) watchLoop() {
 			}
 
 			if changed && w.onChange != nil {
-				w.onChange(processes)
-			}
-			if wellKnownChanged && w.onWellKnownChange != nil {
-				w.onWellKnownChange(wellKnown)
+				w.onChange(services)
 			}
 		}
 	}
 }
 
-func (w *ProcessWatcher) scan() ([]ListeningProcess, []WellKnownProcess, error) {
+func (w *ProcessWatcher) scan() ([]DiscoveredService, error) {
 	listeners, err := w.getListeningPorts()
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	state := &scanState{
@@ -205,16 +171,15 @@ func (w *ProcessWatcher) scan() ([]ListeningProcess, []WellKnownProcess, error) 
 		w.processEntry(state, entry)
 	}
 
-	return state.results, state.wellKnownResults, nil
+	return state.results, nil
 }
 
 type scanState struct {
-	ignoredDirs      map[string]bool
-	usedPorts        map[int]bool
-	seenPID          map[int]bool
-	cwdCache         map[int]string
-	results          []ListeningProcess
-	wellKnownResults []WellKnownProcess
+	ignoredDirs map[string]bool
+	usedPorts   map[int]bool
+	seenPID     map[int]bool
+	cwdCache    map[int]string
+	results     []DiscoveredService
 }
 
 func (w *ProcessWatcher) processEntry(state *scanState, entry portEntry) {
@@ -267,13 +232,17 @@ func (w *ProcessWatcher) addWellKnownProcess(state *scanState, pid int, port int
 	if !ok || state.usedPorts[port] {
 		return
 	}
-	state.wellKnownResults = append(state.wellKnownResults, WellKnownProcess{
-		PID:       pid,
+	state.results = append(state.results, DiscoveredService{
+		Subdomain: info.Subdomain,
 		Port:      port,
 		IP:        ip,
-		Subdomain: info.Subdomain,
 		TCPPort:   info.TCPPort,
-		IsDocker:  w.dockerPorts[port],
+		Source:    RouteSourceWellKnown,
+		Process: &ProcessInfo{
+			PID:         pid,
+			IsWellKnown: true,
+			IsDocker:    w.dockerPorts[port],
+		},
 	})
 	state.usedPorts[port] = true
 }
@@ -282,14 +251,17 @@ func (w *ProcessWatcher) addListeningProcess(state *scanState, pid int, port int
 	if state.seenPID[pid] {
 		return
 	}
-	state.results = append(state.results, ListeningProcess{
-		PID:                pid,
-		Port:               port,
-		IP:                 "127.0.0.1",
-		Subdomain:          subdomain,
-		Cwd:                cwd,
-		Disabled:           needsCustomMapping,
-		NeedsCustomMapping: needsCustomMapping,
+	state.results = append(state.results, DiscoveredService{
+		Subdomain: subdomain,
+		Port:      port,
+		IP:        "127.0.0.1",
+		Source:    RouteSourceProcess,
+		Process: &ProcessInfo{
+			PID:                pid,
+			Cwd:                cwd,
+			Disabled:           needsCustomMapping,
+			NeedsCustomMapping: needsCustomMapping,
+		},
 	})
 	state.seenPID[pid] = true
 }
@@ -366,19 +338,11 @@ func (w *ProcessWatcher) discoverNewServices(targets []ScanTarget) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	for pid, proc := range w.current {
-		key := serviceKey{IP: proc.IP, Port: proc.Port}
-		if svc, ok := serviceByKey[key]; ok {
-			proc.Service = svc
-			w.current[pid] = proc
-		}
-	}
-
-	for pid, proc := range w.currentWellKnown {
-		key := serviceKey{IP: proc.IP, Port: proc.Port}
-		if svc, ok := serviceByKey[key]; ok {
-			proc.Service = svc
-			w.currentWellKnown[pid] = proc
+	for pid, svc := range w.current {
+		key := serviceKey{IP: svc.IP, Port: svc.Port}
+		if info, ok := serviceByKey[key]; ok {
+			svc.Service = info
+			w.current[pid] = svc
 		}
 	}
 }

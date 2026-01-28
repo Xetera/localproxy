@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/events"
 	"github.com/docker/docker/api/types/filters"
@@ -20,20 +19,10 @@ const (
 	LabelTCPPort = "localproxy.tcpport"
 )
 
-type DockerContainer struct {
-	ID            string
-	Name          string
-	Subdomain     string
-	Port          int
-	TCPPort       int
-	IP            string
-	HasCustomName bool
-}
-
 type DockerWatcher struct {
 	client    *client.Client
-	onChange  func([]DockerContainer)
-	onHealthy func(DockerContainer)
+	onChange  func([]DiscoveredService)
+	onHealthy func(DiscoveredService)
 	ctx       context.Context
 	cancel    context.CancelFunc
 }
@@ -53,11 +42,11 @@ func NewDockerWatcher() (*DockerWatcher, error) {
 	}, nil
 }
 
-func (w *DockerWatcher) SetOnChange(fn func([]DockerContainer)) {
+func (w *DockerWatcher) SetOnChange(fn func([]DiscoveredService)) {
 	w.onChange = fn
 }
 
-func (w *DockerWatcher) SetOnHealthy(fn func(DockerContainer)) {
+func (w *DockerWatcher) SetOnHealthy(fn func(DiscoveredService)) {
 	w.onHealthy = fn
 }
 
@@ -79,13 +68,13 @@ func (w *DockerWatcher) Stop() {
 	w.client.Close()
 }
 
-func (w *DockerWatcher) listContainers() ([]DockerContainer, error) {
+func (w *DockerWatcher) listContainers() ([]DiscoveredService, error) {
 	containers, err := w.client.ContainerList(w.ctx, container.ListOptions{})
 	if err != nil {
 		return nil, err
 	}
 
-	var result []DockerContainer
+	var result []DiscoveredService
 	for _, c := range containers {
 		dc := w.parseContainer(c)
 		if dc != nil {
@@ -95,7 +84,7 @@ func (w *DockerWatcher) listContainers() ([]DockerContainer, error) {
 	return result, nil
 }
 
-func (w *DockerWatcher) parseContainer(c types.Container) *DockerContainer {
+func (w *DockerWatcher) parseContainer(c container.Summary) *DiscoveredService {
 	if len(c.Names) == 0 {
 		return nil
 	}
@@ -149,14 +138,17 @@ func (w *DockerWatcher) parseContainer(c types.Container) *DockerContainer {
 		return nil
 	}
 
-	return &DockerContainer{
-		ID:            c.ID,
-		Name:          name,
-		Subdomain:     subdomain,
-		Port:          port,
-		TCPPort:       tcpPort,
-		IP:            ip,
-		HasCustomName: hasCustomName,
+	return &DiscoveredService{
+		Subdomain: subdomain,
+		Port:      port,
+		IP:        ip,
+		TCPPort:   tcpPort,
+		Source:    RouteSourceDocker,
+		Docker: &DockerInfo{
+			ID:            c.ID,
+			Name:          name,
+			HasCustomName: hasCustomName,
+		},
 	}
 }
 
@@ -202,7 +194,7 @@ func (w *DockerWatcher) waitForHealthy(containerID string) {
 			return
 		}
 		for _, c := range containers {
-			if c.ID == containerID {
+			if c.Docker != nil && c.Docker.ID == containerID {
 				w.onHealthy(c)
 				return
 			}
@@ -239,7 +231,7 @@ func (w *DockerWatcher) waitForHealthy(containerID string) {
 					return
 				}
 				for _, c := range containers {
-					if c.ID == containerID {
+					if c.Docker != nil && c.Docker.ID == containerID {
 						w.onHealthy(c)
 						return
 					}

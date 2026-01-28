@@ -1,22 +1,43 @@
 package discovery
 
-type ListeningProcess struct {
+type RouteSource string
+
+const (
+	RouteSourceProcess   RouteSource = "process"
+	RouteSourceDocker    RouteSource = "docker"
+	RouteSourceWellKnown RouteSource = "wellknown"
+	RouteSourceFile      RouteSource = "file"
+)
+
+type DiscoveredService struct {
+	Subdomain string
+	Port      int
+	IP        string
+	TCPPort   int
+	Source    RouteSource
+
+	Process *ProcessInfo
+	Docker  *DockerInfo
+	File    *FileInfo
+	Service *ServiceInfo
+}
+
+type ProcessInfo struct {
 	PID                int
-	Port               int
-	IP                 string
-	Subdomain          string
 	Cwd                string
 	Disabled           bool
 	NeedsCustomMapping bool
-	Service            *ServiceInfo
+	IsWellKnown        bool
+	IsDocker           bool
 }
 
-type WellKnownProcess struct {
-	PID       int
-	Port      int
-	IP        string
-	Subdomain string
-	TCPPort   int
-	IsDocker  bool
-	Service   *ServiceInfo
+type DockerInfo struct {
+	ID            string
+	Name          string
+	HasCustomName bool
+}
+
+type FileInfo struct {
+	Path string
+	Name string
 }
