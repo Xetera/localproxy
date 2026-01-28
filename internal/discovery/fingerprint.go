@@ -38,7 +38,7 @@ func DiscoverServices(ctx context.Context, targets []ScanTarget) ([]ServiceInfo,
 		fmt.Println(address, ip, port)
 		t = append(t, plugins.Target{
 			Address: address,
-			Host:    "127.0.0.1",
+			Host:    "",
 		})
 	}
 

@@ -14,7 +14,9 @@ type ListeningProcess struct {
 type WellKnownProcess struct {
 	PID       int
 	Port      int
+	IP        string
 	Subdomain string
 	TCPPort   int
 	IsDocker  bool
+	Service   *ServiceInfo
 }

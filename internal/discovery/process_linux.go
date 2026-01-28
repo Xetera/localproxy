@@ -11,6 +11,11 @@ import (
 	"strings"
 )
 
+func hexByte(s string) int {
+	i, _ := strconv.ParseInt(s, 16, 32)
+	return int(i)
+}
+
 func (w *ProcessWatcher) getListeningPorts() ([]portEntry, error) {
 	entries, err := w.parseProcNet("/proc/net/tcp")
 	if err != nil {
@@ -76,6 +81,7 @@ func (w *ProcessWatcher) parseProcNet(path string) ([]portEntry, error) {
 			continue
 		}
 
+		addrHex := addrParts[0]
 		portHex := addrParts[1]
 		port64, err := strconv.ParseInt(portHex, 16, 32)
 		if err != nil {
@@ -87,13 +93,24 @@ func (w *ProcessWatcher) parseProcNet(path string) ([]portEntry, error) {
 			continue
 		}
 
+		var ipStr string
+		if len(addrHex) == 8 {
+			ipStr = fmt.Sprintf("%d.%d.%d.%d",
+				hexByte(addrHex[6:8]),
+				hexByte(addrHex[4:6]),
+				hexByte(addrHex[2:4]),
+				hexByte(addrHex[0:2]))
+		} else {
+			ipStr = "::1"
+		}
+
 		inode := fields[9]
 		pid, ok := inodeToPID[inode]
 		if !ok {
 			continue
 		}
 
-		result = append(result, portEntry{PID: pid, Port: port})
+		result = append(result, portEntry{PID: pid, Port: port, IP: ipStr})
 	}
 
 	return result, nil

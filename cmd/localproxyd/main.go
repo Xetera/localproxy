@@ -192,18 +192,31 @@ func main() {
 
 			if processWatcher != nil {
 				ports := make([]int, 0, len(containers))
-				targets := make([]discovery.ScanTarget, 0)
 				for _, c := range containers {
 					ports = append(ports, c.Port)
-					targets = append(targets, discovery.ScanTarget{
-						IP:   c.IP,
-						Port: c.Port,
-					})
 				}
-				discovery.DiscoverServices(context.Background(), targets)
 
 				processWatcher.SetDockerPorts(ports)
 			}
+		})
+		dockerWatcher.SetOnHealthy(func(dc discovery.DockerContainer) {
+			fmt.Println("TARGET IS HEALTHy", dc.Name)
+			if processWatcher != nil {
+				targets := make([]discovery.ScanTarget, 0)
+				targets = append(targets, discovery.ScanTarget{
+					IP:   dc.IP,
+					Port: dc.Port,
+				})
+				dockerWatcher.WaitForDiscovery(dc.ID, func() bool {
+					services, err := discovery.DiscoverServices(context.Background(), targets)
+					if err != nil {
+						return false
+					}
+					fmt.Println("success", services)
+					return len(services) > 0
+				})
+			}
+
 		})
 		if err := dockerWatcher.Start(); err != nil {
 			log.Printf("warning: failed to start docker watcher: %v", err)

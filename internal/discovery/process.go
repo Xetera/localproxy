@@ -11,6 +11,7 @@ import (
 type portEntry struct {
 	PID  int
 	Port int
+	IP   string
 }
 
 type ProcessWatcher struct {
@@ -81,6 +82,17 @@ func (w *ProcessWatcher) Start() error {
 	}
 	w.mu.Unlock()
 
+	initialTargets := make([]ScanTarget, 0, len(processes)+len(wellKnown))
+	for _, p := range processes {
+		initialTargets = append(initialTargets, ScanTarget{IP: p.IP, Port: p.Port})
+	}
+	for _, p := range wellKnown {
+		initialTargets = append(initialTargets, ScanTarget{IP: p.IP, Port: p.Port})
+	}
+	if len(initialTargets) > 0 {
+		w.discoverNewServices(initialTargets)
+	}
+
 	if w.onChange != nil {
 		w.onChange(processes)
 	}
@@ -135,6 +147,13 @@ func (w *ProcessWatcher) watchLoop() {
 					if existing, ok := w.currentWellKnown[p.PID]; !ok || existing.Port != p.Port {
 						wellKnownChanged = true
 						break
+					}
+				}
+			}
+			if wellKnownChanged {
+				for _, p := range wellKnown {
+					if _, ok := w.currentWellKnown[p.PID]; !ok {
+						newTargets = append(newTargets, ScanTarget{IP: p.IP, Port: p.Port})
 					}
 				}
 			}
@@ -201,17 +220,18 @@ type scanState struct {
 func (w *ProcessWatcher) processEntry(state *scanState, entry portEntry) {
 	pid := entry.PID
 	port := entry.Port
+	ip := entry.IP
 
 	cwd := w.getOrCacheCWD(state, pid)
 
 	if cwd == "" {
-		w.handleUnknownCWD(state, pid, port)
+		w.handleUnknownCWD(state, pid, port, ip)
 		return
 	}
 
 	basePath := w.findMatchingBasePath(cwd)
 	if basePath == "" {
-		w.handleOutsideBasePath(state, cwd, pid, port)
+		w.handleOutsideBasePath(state, cwd, pid, port, ip)
 		return
 	}
 
@@ -242,7 +262,7 @@ func (w *ProcessWatcher) findMatchingBasePath(cwd string) string {
 	return ""
 }
 
-func (w *ProcessWatcher) addWellKnownProcess(state *scanState, pid int, port int) {
+func (w *ProcessWatcher) addWellKnownProcess(state *scanState, pid int, port int, ip string) {
 	info, ok := WellKnownPorts[port]
 	if !ok || state.usedPorts[port] {
 		return
@@ -250,6 +270,7 @@ func (w *ProcessWatcher) addWellKnownProcess(state *scanState, pid int, port int
 	state.wellKnownResults = append(state.wellKnownResults, WellKnownProcess{
 		PID:       pid,
 		Port:      port,
+		IP:        ip,
 		Subdomain: info.Subdomain,
 		TCPPort:   info.TCPPort,
 		IsDocker:  w.dockerPorts[port],
@@ -273,12 +294,12 @@ func (w *ProcessWatcher) addListeningProcess(state *scanState, pid int, port int
 	state.seenPID[pid] = true
 }
 
-func (w *ProcessWatcher) handleUnknownCWD(state *scanState, pid int, port int) {
-	w.addWellKnownProcess(state, pid, port)
+func (w *ProcessWatcher) handleUnknownCWD(state *scanState, pid int, port int, ip string) {
+	w.addWellKnownProcess(state, pid, port, ip)
 }
 
-func (w *ProcessWatcher) handleOutsideBasePath(state *scanState, cwd string, pid int, port int) {
-	w.addWellKnownProcess(state, pid, port)
+func (w *ProcessWatcher) handleOutsideBasePath(state *scanState, cwd string, pid int, port int, ip string) {
+	w.addWellKnownProcess(state, pid, port, ip)
 }
 
 func (w *ProcessWatcher) buildSubdomain(basePath string, cwd string, ignoredDirs map[string]bool) (string, bool) {
@@ -350,6 +371,14 @@ func (w *ProcessWatcher) discoverNewServices(targets []ScanTarget) {
 		if svc, ok := serviceByKey[key]; ok {
 			proc.Service = svc
 			w.current[pid] = proc
+		}
+	}
+
+	for pid, proc := range w.currentWellKnown {
+		key := serviceKey{IP: proc.IP, Port: proc.Port}
+		if svc, ok := serviceByKey[key]; ok {
+			proc.Service = svc
+			w.currentWellKnown[pid] = proc
 		}
 	}
 }

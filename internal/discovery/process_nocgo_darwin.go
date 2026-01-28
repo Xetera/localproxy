@@ -58,7 +58,12 @@ func (w *ProcessWatcher) getListeningPorts() ([]portEntry, error) {
 			continue
 		}
 
-		result = append(result, portEntry{PID: pid, Port: port})
+		ipStr := addr[:colonIdx]
+		if ipStr == "*" {
+			ipStr = "127.0.0.1"
+		}
+
+		result = append(result, portEntry{PID: pid, Port: port, IP: ipStr})
 	}
 
 	return result, nil

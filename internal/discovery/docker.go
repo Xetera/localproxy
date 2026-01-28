@@ -5,6 +5,7 @@ import (
 	"log"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
@@ -30,10 +31,11 @@ type DockerContainer struct {
 }
 
 type DockerWatcher struct {
-	client   *client.Client
-	onChange func([]DockerContainer)
-	ctx      context.Context
-	cancel   context.CancelFunc
+	client    *client.Client
+	onChange  func([]DockerContainer)
+	onHealthy func(DockerContainer)
+	ctx       context.Context
+	cancel    context.CancelFunc
 }
 
 func NewDockerWatcher() (*DockerWatcher, error) {
@@ -53,6 +55,10 @@ func NewDockerWatcher() (*DockerWatcher, error) {
 
 func (w *DockerWatcher) SetOnChange(fn func([]DockerContainer)) {
 	w.onChange = fn
+}
+
+func (w *DockerWatcher) SetOnHealthy(fn func(DockerContainer)) {
+	w.onHealthy = fn
 }
 
 func (w *DockerWatcher) Start() error {
@@ -168,13 +174,93 @@ func (w *DockerWatcher) watchEvents() {
 		select {
 		case <-w.ctx.Done():
 			return
-		case <-eventsChan:
+		case event := <-eventsChan:
 			containers, err := w.listContainers()
 			if err == nil && w.onChange != nil {
 				w.onChange(containers)
+			}
+
+			if event.Action == "start" && w.onHealthy != nil {
+				go w.waitForHealthy(event.Actor.ID)
 			}
 		case <-errChan:
 			return
 		}
 	}
+}
+
+func (w *DockerWatcher) waitForHealthy(containerID string) {
+	inspect, err := w.client.ContainerInspect(w.ctx, containerID)
+	if err != nil {
+		log.Printf("docker: failed to inspect container %s: %v", containerID, err)
+		return
+	}
+
+	if inspect.State.Health == nil {
+		containers, err := w.listContainers()
+		if err != nil {
+			return
+		}
+		for _, c := range containers {
+			if c.ID == containerID {
+				w.onHealthy(c)
+				return
+			}
+		}
+		return
+	}
+
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	timeout := time.After(5 * time.Minute)
+
+	for {
+		select {
+		case <-w.ctx.Done():
+			return
+		case <-timeout:
+			log.Printf("docker: health check timeout for container %s", containerID)
+			return
+		case <-ticker.C:
+			inspect, err := w.client.ContainerInspect(w.ctx, containerID)
+			if err != nil {
+				log.Printf("docker: failed to inspect container %s: %v", containerID, err)
+				return
+			}
+
+			if inspect.State.Health == nil {
+				return
+			}
+
+			if inspect.State.Health.Status == "healthy" {
+				containers, err := w.listContainers()
+				if err != nil {
+					return
+				}
+				for _, c := range containers {
+					if c.ID == containerID {
+						w.onHealthy(c)
+						return
+					}
+				}
+				return
+			}
+		}
+	}
+}
+
+func (w *DockerWatcher) WaitForDiscovery(containerID string, discover func() bool) {
+	for i := range 3 {
+		select {
+		case <-w.ctx.Done():
+			return
+		case <-time.After(3 * time.Second):
+			if discover() {
+				return
+			}
+			log.Printf("docker: discovery attempt %d failed for container %s", i+1, containerID)
+		}
+	}
+	log.Printf("docker: giving up discovery for container %s after 3 attempts", containerID)
 }
