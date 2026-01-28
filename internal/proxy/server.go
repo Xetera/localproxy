@@ -3,14 +3,15 @@ package proxy
 import (
 	"bufio"
 	"context"
-	"embed"
 	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -25,8 +26,30 @@ const (
 	ServerPort = 13279
 )
 
-//go:embed templates/*.html
-var templateFS embed.FS
+func getTemplatesPath() string {
+	paths := []string{
+		"templates",
+		"internal/proxy/templates",
+	}
+
+	for _, p := range paths {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+
+	if exe, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exe)
+		for _, p := range paths {
+			fullPath := filepath.Join(exeDir, p)
+			if _, err := os.Stat(fullPath); err == nil {
+				return fullPath
+			}
+		}
+	}
+
+	return "internal/proxy/templates"
+}
 
 type DashboardServer struct {
 	server     *http.Server
@@ -231,7 +254,8 @@ func (s *DashboardServer) serveDashboard(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	tmpl, err := template.ParseFS(templateFS, "templates/dashboard.html")
+	templatesPath := getTemplatesPath()
+	tmpl, err := template.ParseFiles(filepath.Join(templatesPath, "dashboard.html"))
 	if err != nil {
 		http.Error(w, fmt.Sprintf("template error: %v", err), http.StatusInternalServerError)
 		return
@@ -314,7 +338,8 @@ func (s *DashboardServer) serveLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tmpl, err := template.ParseFS(templateFS, "templates/logs.html")
+	templatesPath := getTemplatesPath()
+	tmpl, err := template.ParseFiles(filepath.Join(templatesPath, "logs.html"))
 	if err != nil {
 		http.Error(w, fmt.Sprintf("template error: %v", err), http.StatusInternalServerError)
 		return
