@@ -2,15 +2,19 @@ package proxy
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"io"
 	"log"
 	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/xetera/localproxy/internal/discovery"
 )
 
@@ -194,20 +198,55 @@ func (lm *LogManager) tailDockerLogs(ctx context.Context, containerID string) {
 
 	log.Printf("docker logs: started tailing container %s", containerID[:12])
 
-	scanner := bufio.NewScanner(reader)
-	for scanner.Scan() {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-			line := scanner.Text()
-			if len(line) > 8 {
-				line = line[8:]
+	var stdoutBuf, stderrBuf bytes.Buffer
+	outputDone := make(chan error)
+
+	go func() {
+		_, err := stdcopy.StdCopy(&stdoutBuf, &stderrBuf, reader)
+		outputDone <- err
+	}()
+
+	ticker := lm.processLogBuffers(ctx, buffer, &stdoutBuf, &stderrBuf)
+	defer ticker.Stop()
+
+	select {
+	case <-ctx.Done():
+		return
+	case <-outputDone:
+		return
+	}
+}
+
+func (lm *LogManager) processLogBuffers(ctx context.Context, buffer *LogBuffer, stdout, stderr *bytes.Buffer) *time.Ticker {
+	ticker := time.NewTicker(100 * time.Millisecond)
+
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				lm.drainBuffer(buffer, stdout)
+				lm.drainBuffer(buffer, stderr)
 			}
-			line = strings.TrimSpace(line)
+		}
+	}()
+
+	return ticker
+}
+
+func (lm *LogManager) drainBuffer(buffer *LogBuffer, src *bytes.Buffer) {
+	for {
+		line, err := src.ReadString('\n')
+		if err == io.EOF {
 			if line != "" {
-				buffer.Add(line)
+				src.WriteString(line)
 			}
+			break
+		}
+		line = strings.TrimSpace(line)
+		if line != "" {
+			buffer.Add(line)
 		}
 	}
 }
