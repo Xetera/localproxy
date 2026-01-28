@@ -180,6 +180,11 @@ func (s *DashboardServer) serveDashboard(w http.ResponseWriter, r *http.Request)
 			processRoutes = append(processRoutes, r)
 		}
 	}
+	for _, r := range disabledRoutes {
+		if r.Source == RouteSourceProcess {
+			processRoutes = append(processRoutes, r)
+		}
+	}
 
 	sort.Slice(dockerRoutes, func(i, j int) bool {
 		return dockerRoutes[i].Subdomain < dockerRoutes[j].Subdomain
@@ -190,6 +195,12 @@ func (s *DashboardServer) serveDashboard(w http.ResponseWriter, r *http.Request)
 	sort.Slice(disabledRoutes, func(i, j int) bool {
 		return disabledRoutes[i].Subdomain < disabledRoutes[j].Subdomain
 	})
+	var otherDisabledRoutes []RouteWithLogs
+	for _, r := range disabledRoutes {
+		if r.Source != RouteSourceProcess {
+			otherDisabledRoutes = append(otherDisabledRoutes, r)
+		}
+	}
 	sort.Slice(wellKnownRoutes, func(i, j int) bool {
 		return wellKnownRoutes[i].Subdomain < wellKnownRoutes[j].Subdomain
 	})
@@ -265,6 +276,11 @@ func (s *DashboardServer) serveDashboard(w http.ResponseWriter, r *http.Request)
 	for _, r := range enabledRoutes {
 		logsMap[r.Subdomain] = r.RecentLogs
 	}
+	for _, r := range processRoutes {
+		if _, exists := logsMap[r.Subdomain]; !exists {
+			logsMap[r.Subdomain] = r.RecentLogs
+		}
+	}
 	for _, r := range wellKnownRoutes {
 		logsMap[r.Subdomain] = r.RecentLogs
 	}
@@ -274,6 +290,11 @@ func (s *DashboardServer) serveDashboard(w http.ResponseWriter, r *http.Request)
 	routesMap := make(map[string]Route)
 	for _, r := range enabledRoutes {
 		routesMap[r.Subdomain] = r.Route
+	}
+	for _, r := range processRoutes {
+		if _, exists := routesMap[r.Subdomain]; !exists {
+			routesMap[r.Subdomain] = r.Route
+		}
 	}
 	for _, r := range wellKnownRoutes {
 		routesMap[r.Subdomain] = r.Route
@@ -286,7 +307,7 @@ func (s *DashboardServer) serveDashboard(w http.ResponseWriter, r *http.Request)
 		"DockerRoutes":       dockerRoutes,
 		"ProcessGroups":      processGroups,
 		"UngroupedProcesses": ungroupedProcesses,
-		"DisabledRoutes":     disabledRoutes,
+		"DisabledRoutes":     otherDisabledRoutes,
 		"WellKnownRoutes":    wellKnownRoutes,
 		"InactiveWellKnown":  inactiveWellKnown,
 		"LogsMapJSON":        template.JS(logsJSON),

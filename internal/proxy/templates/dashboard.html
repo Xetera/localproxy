@@ -407,10 +407,28 @@
             {{if .TCPPort}}<span>tcp:{{.TCPPort}}</span>{{end}}
           </div>
         </div>
-        {{end}} {{end}} {{if not .DockerRoutes}} {{if not .ProcessGroups}} {{if
-        not .UngroupedProcesses}} {{if not .WellKnownRoutes}}
+        {{end}} {{end}} {{if .DisabledRoutes}}
+        <div class="section-divider">Disabled Routes</div>
+        {{range .DisabledRoutes}}
+        <div
+          class="service-item"
+          data-subdomain="{{.Subdomain}}"
+          onclick="selectService('{{.Subdomain}}')"
+        >
+          <div class="service-header">
+            <div class="service-name">{{.Subdomain}}.proxy.localhost</div>
+            <div class="log-count" id="count-{{.Subdomain}}">0 lines</div>
+          </div>
+          <div class="service-meta">
+            <span class="badge badge-warning">disabled</span>
+            <span
+              >{{if .TCPPort}}tcp:{{.TCPPort}}{{else}}:{{.Port}}{{end}}</span
+            >
+          </div>
+        </div>
+        {{end}} {{end}} {{if and (not .DockerRoutes) (not .ProcessGroups) (not .UngroupedProcesses) (not .WellKnownRoutes) (not .DisabledRoutes)}}
         <div class="detail-empty">No active services</div>
-        {{end}} {{end}} {{end}} {{end}}
+        {{end}}
       </div>
 
       <div class="detail-panel">
