@@ -242,17 +242,17 @@ func (w *DockerWatcher) waitForHealthy(containerID string) {
 	}
 }
 
-func (w *DockerWatcher) WaitForDiscovery(containerID string, discover func() bool) {
-	for i := range 3 {
-		select {
-		case <-w.ctx.Done():
+func (w *DockerWatcher) DiscoverServiceInfo(svc DiscoveredService, onDiscovered func(DiscoveredService)) {
+	targets := []ScanTarget{{IP: svc.IP, Port: svc.Port}}
+	results := make(chan []ServiceInfo, 1)
+	DiscoverServices(w.ctx, targets, results)
+
+	go func() {
+		services, ok := <-results
+		if !ok || len(services) == 0 {
 			return
-		case <-time.After(3 * time.Second):
-			if discover() {
-				return
-			}
-			log.Printf("docker: discovery attempt %d failed for container %s", i+1, containerID)
 		}
-	}
-	log.Printf("docker: giving up discovery for container %s after 3 attempts", containerID)
+		svc.Service = &services[0]
+		onDiscovered(svc)
+	}()
 }

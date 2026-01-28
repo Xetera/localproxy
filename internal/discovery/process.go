@@ -318,31 +318,37 @@ func (w *ProcessWatcher) reverseAndJoin(parts []string) string {
 
 func (w *ProcessWatcher) discoverNewServices(targets []ScanTarget) {
 	ctx, cancel := context.WithTimeout(w.ctx, 30*time.Second)
-	defer cancel()
 
-	services, err := DiscoverServices(ctx, targets)
-	if err != nil {
-		return
-	}
+	results := make(chan []ServiceInfo, 1)
+	DiscoverServices(ctx, targets, results)
 
-	type serviceKey struct {
-		IP   string
-		Port int
-	}
-	serviceByKey := make(map[serviceKey]*ServiceInfo)
-	for i := range services {
-		key := serviceKey{IP: services[i].IP, Port: services[i].Port}
-		serviceByKey[key] = &services[i]
-	}
+	go func() {
+		defer cancel()
 
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	for pid, svc := range w.current {
-		key := serviceKey{IP: svc.IP, Port: svc.Port}
-		if info, ok := serviceByKey[key]; ok {
-			svc.Service = info
-			w.current[pid] = svc
+		services, ok := <-results
+		if !ok || len(services) == 0 {
+			return
 		}
-	}
+
+		type serviceKey struct {
+			IP   string
+			Port int
+		}
+		serviceByKey := make(map[serviceKey]*ServiceInfo)
+		for i := range services {
+			key := serviceKey{IP: services[i].IP, Port: services[i].Port}
+			serviceByKey[key] = &services[i]
+		}
+
+		w.mu.Lock()
+		defer w.mu.Unlock()
+
+		for pid, svc := range w.current {
+			key := serviceKey{IP: svc.IP, Port: svc.Port}
+			if info, ok := serviceByKey[key]; ok {
+				svc.Service = info
+				w.current[pid] = svc
+			}
+		}
+	}()
 }

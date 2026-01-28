@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"log"
@@ -185,26 +184,10 @@ func main() {
 			}
 		})
 		dockerWatcher.SetOnHealthy(func(svc discovery.DiscoveredService) {
-			fmt.Println("TARGET IS HEALTHy", svc.Subdomain)
-			if processWatcher != nil {
-				targets := make([]discovery.ScanTarget, 0)
-				targets = append(targets, discovery.ScanTarget{
-					IP:   svc.IP,
-					Port: svc.Port,
-				})
-				containerID := ""
-				if svc.Docker != nil {
-					containerID = svc.Docker.ID
-				}
-				dockerWatcher.WaitForDiscovery(containerID, func() bool {
-					services, err := discovery.DiscoverServices(context.Background(), targets)
-					if err != nil {
-						return false
-					}
-					fmt.Println("success", services)
-					return len(services) > 0
-				})
-			}
+			log.Printf("docker: container healthy %s", svc.Subdomain)
+			dockerWatcher.DiscoverServiceInfo(svc, func(updated discovery.DiscoveredService) {
+				routeRegistry.UpdateServices(discovery.RouteSourceDocker, []discovery.DiscoveredService{updated})
+			})
 		})
 		if err := dockerWatcher.Start(); err != nil {
 			log.Printf("warning: failed to start docker watcher: %v", err)
