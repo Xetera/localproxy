@@ -15,6 +15,7 @@ import (
 	"github.com/xetera/localproxy/internal/discovery"
 	"github.com/xetera/localproxy/internal/envoy"
 	"github.com/xetera/localproxy/internal/hosts"
+	"github.com/xetera/localproxy/internal/notification"
 	"github.com/xetera/localproxy/internal/proxy"
 	"github.com/xetera/localproxy/internal/registry"
 	"github.com/xetera/localproxy/internal/xds"
@@ -68,7 +69,7 @@ func main() {
 		log.Fatalf("failed to start envoy: %v", err)
 	}
 
-	dashboardServer := proxy.NewDashboardServer()
+	dashboardServer := proxy.NewDashboardServer(nil)
 	routeRegistry := registry.NewRouteRegistry()
 
 	routeRegistry.SetOnChange(func(routes []proxy.Route) {
@@ -140,13 +141,32 @@ func main() {
 		}
 	}
 
+	homeDir, _ := os.UserHomeDir()
+	dashboardServer.SetBasePaths(append(basePaths, homeDir))
+
+	notifier := notification.NewNotifier()
 	processWatcher, err := discovery.NewProcessWatcher(basePaths)
 	if err != nil {
 		log.Printf("warning: process watcher disabled: %v", err)
 	} else {
+		seenBackends := make(map[string]bool)
+		watcherStarted := false
+
 		processWatcher.SetOnChange(func(processes []discovery.ListeningProcess) {
 			log.Printf("processes changed: %d", len(processes))
 			routeRegistry.UpdateProcesses(processes)
+
+			for _, p := range processes {
+				if !seenBackends[p.Subdomain] {
+					if watcherStarted && !p.Disabled {
+						log.Printf("sending notification for backend: %s", p.Subdomain)
+						if err := notifier.NotifyBackend(p.Subdomain, notification.IsDockerBackend(p.Subdomain, p.Cwd)); err != nil {
+							log.Printf("failed to send notification: %v", err)
+						}
+					}
+					seenBackends[p.Subdomain] = true
+				}
+			}
 		})
 		processWatcher.SetOnWellKnownChange(func(processes []discovery.WellKnownProcess) {
 			log.Printf("well-known changed: %d", len(processes))
@@ -154,16 +174,30 @@ func main() {
 				log.Printf("  well-known: %s -> :%d (pid %d)", p.Subdomain, p.Port, p.PID)
 			}
 			routeRegistry.UpdateWellKnownPorts(processes)
+
+			for _, p := range processes {
+				if !seenBackends[p.Subdomain] {
+					if watcherStarted {
+						log.Printf("sending notification for well-known backend: %s", p.Subdomain)
+						if err := notifier.NotifyBackend(p.Subdomain, notification.IsDockerBackend(p.Subdomain, "")); err != nil {
+							log.Printf("failed to send notification: %v", err)
+						}
+					}
+					seenBackends[p.Subdomain] = true
+				}
+			}
 		})
 		if err := processWatcher.Start(); err != nil {
 			log.Printf("warning: failed to start process watcher: %v", err)
+		} else {
+			watcherStarted = true
 		}
 	}
 
 	if err := dashboardServer.Start(); err != nil {
 		log.Fatalf("failed to start dashboard server: %v", err)
 	}
-	log.Printf("dashboard server listening on 127.0.0.1:8080")
+	log.Printf("dashboard server listening on 127.0.0.1:%d", proxy.ServerPort)
 	log.Printf("envoy proxy listening on :80 and :443")
 
 	sigCh := make(chan os.Signal, 1)

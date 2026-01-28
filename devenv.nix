@@ -1,6 +1,10 @@
 { pkgs, lib, ... }:
 
-let envoy = import ./envoy.nix { inherit pkgs lib; stdenv = pkgs.stdenv; };
+let
+  envoy = import ./envoy.nix {
+    inherit pkgs lib;
+    stdenv = pkgs.stdenv;
+  };
 in
 {
   env.CGO_ENABLED = 0;

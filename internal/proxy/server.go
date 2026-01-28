@@ -33,12 +33,14 @@ type DashboardServer struct {
 	routes     map[string]Route
 	routesMu   sync.RWMutex
 	logManager *LogManager
+	basePaths  []string
 }
 
-func NewDashboardServer() *DashboardServer {
+func NewDashboardServer(basePaths []string) *DashboardServer {
 	s := &DashboardServer{
 		routes:     make(map[string]Route),
 		logManager: NewLogManager(),
+		basePaths:  basePaths,
 	}
 
 	mux := http.NewServeMux()
@@ -54,6 +56,12 @@ func NewDashboardServer() *DashboardServer {
 	}
 
 	return s
+}
+
+func (s *DashboardServer) SetBasePaths(paths []string) {
+	s.routesMu.Lock()
+	defer s.routesMu.Unlock()
+	s.basePaths = paths
 }
 
 func (s *DashboardServer) UpdateRoutes(routes []Route) {
@@ -90,6 +98,25 @@ type RouteWithLogs struct {
 	RecentLogs []string
 }
 
+type ProcessGroup struct {
+	Cwd        string
+	DisplayCwd string
+	Routes     []RouteWithLogs
+}
+
+func trimBasePath(cwd string, basePaths []string) string {
+	for _, base := range basePaths {
+		if trimmed, ok := strings.CutPrefix(cwd, base); ok {
+			trimmed = strings.TrimPrefix(trimmed, "/")
+			if idx := strings.Index(trimmed, "/"); idx != -1 {
+				return trimmed[:idx]
+			}
+			return trimmed
+		}
+	}
+	return cwd
+}
+
 func (s *DashboardServer) serveDashboard(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
@@ -97,6 +124,7 @@ func (s *DashboardServer) serveDashboard(w http.ResponseWriter, r *http.Request)
 	}
 
 	s.routesMu.RLock()
+	basePaths := s.basePaths
 	var enabledRoutes, disabledRoutes, wellKnownRoutes []RouteWithLogs
 	for _, route := range s.routes {
 		routeWithLogs := RouteWithLogs{
@@ -121,14 +149,73 @@ func (s *DashboardServer) serveDashboard(w http.ResponseWriter, r *http.Request)
 	}
 	s.routesMu.RUnlock()
 
-	sort.Slice(enabledRoutes, func(i, j int) bool {
-		return enabledRoutes[i].Subdomain < enabledRoutes[j].Subdomain
+	var dockerRoutes, processRoutes []RouteWithLogs
+	for _, r := range enabledRoutes {
+		if r.Source == RouteSourceDocker {
+			dockerRoutes = append(dockerRoutes, r)
+		} else {
+			processRoutes = append(processRoutes, r)
+		}
+	}
+
+	sort.Slice(dockerRoutes, func(i, j int) bool {
+		return dockerRoutes[i].Subdomain < dockerRoutes[j].Subdomain
+	})
+	sort.Slice(processRoutes, func(i, j int) bool {
+		return processRoutes[i].Subdomain < processRoutes[j].Subdomain
 	})
 	sort.Slice(disabledRoutes, func(i, j int) bool {
 		return disabledRoutes[i].Subdomain < disabledRoutes[j].Subdomain
 	})
 	sort.Slice(wellKnownRoutes, func(i, j int) bool {
 		return wellKnownRoutes[i].Subdomain < wellKnownRoutes[j].Subdomain
+	})
+
+	type routeWithDisplayCwd struct {
+		route      RouteWithLogs
+		displayCwd string
+	}
+	var processRoutesWithDisplay []routeWithDisplayCwd
+	displayCwdCounts := make(map[string]int)
+	for _, r := range processRoutes {
+		displayCwd := trimBasePath(r.Cwd, basePaths)
+		processRoutesWithDisplay = append(processRoutesWithDisplay, routeWithDisplayCwd{
+			route:      r,
+			displayCwd: displayCwd,
+		})
+		if displayCwd != "" {
+			displayCwdCounts[displayCwd]++
+		}
+	}
+
+	var processGroups []ProcessGroup
+	groupedDisplayCwds := make(map[string]bool)
+	var ungroupedProcesses []RouteWithLogs
+	fmt.Println(displayCwdCounts)
+
+	for _, r := range processRoutesWithDisplay {
+		if r.displayCwd != "" && displayCwdCounts[r.displayCwd] > 1 {
+			if !groupedDisplayCwds[r.displayCwd] {
+				groupedDisplayCwds[r.displayCwd] = true
+				var groupRoutes []RouteWithLogs
+				for _, pr := range processRoutesWithDisplay {
+					if pr.displayCwd == r.displayCwd {
+						groupRoutes = append(groupRoutes, pr.route)
+					}
+				}
+				processGroups = append(processGroups, ProcessGroup{
+					Cwd:        r.route.Cwd,
+					DisplayCwd: r.displayCwd,
+					Routes:     groupRoutes,
+				})
+			}
+		} else {
+			ungroupedProcesses = append(ungroupedProcesses, r.route)
+		}
+	}
+
+	sort.Slice(processGroups, func(i, j int) bool {
+		return processGroups[i].Cwd < processGroups[j].Cwd
 	})
 
 	activeWellKnown := make(map[string]bool)
@@ -171,12 +258,15 @@ func (s *DashboardServer) serveDashboard(w http.ResponseWriter, r *http.Request)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	tmpl.Execute(w, map[string]interface{}{
-		"EnabledRoutes":     enabledRoutes,
-		"DisabledRoutes":    disabledRoutes,
-		"WellKnownRoutes":   wellKnownRoutes,
-		"InactiveWellKnown": inactiveWellKnown,
-		"LogsMapJSON":       template.JS(logsJSON),
-		"RoutesJSON":        template.JS(routesJSON),
+		"EnabledRoutes":      enabledRoutes,
+		"DockerRoutes":       dockerRoutes,
+		"ProcessGroups":      processGroups,
+		"UngroupedProcesses": ungroupedProcesses,
+		"DisabledRoutes":     disabledRoutes,
+		"WellKnownRoutes":    wellKnownRoutes,
+		"InactiveWellKnown":  inactiveWellKnown,
+		"LogsMapJSON":        template.JS(logsJSON),
+		"RoutesJSON":         template.JS(routesJSON),
 	})
 }
 
