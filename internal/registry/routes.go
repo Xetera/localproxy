@@ -90,6 +90,7 @@ func (r *RouteRegistry) UpdateWellKnownPorts(ports []discovery.WellKnownProcess)
 			TCPPort:   p.TCPPort,
 			PID:       p.PID,
 			Source:    proxy.RouteSourceWellKnown,
+			IsDocker:  p.IsDocker,
 		}
 	}
 

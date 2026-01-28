@@ -119,19 +119,6 @@ func main() {
 		}
 	}
 
-	dockerWatcher, err := discovery.NewDockerWatcher()
-	if err != nil {
-		log.Printf("warning: docker watcher disabled: %v", err)
-	} else {
-		dockerWatcher.SetOnChange(func(containers []discovery.DockerContainer) {
-			log.Printf("docker containers changed: %d", len(containers))
-			routeRegistry.UpdateDockerContainers(containers)
-		})
-		if err := dockerWatcher.Start(); err != nil {
-			log.Printf("warning: failed to start docker watcher: %v", err)
-		}
-	}
-
 	basePaths := watchPaths
 	if len(basePaths) == 0 {
 		if envPath := os.Getenv("LOCALPROXY_BASE_PATH"); envPath != "" {
@@ -191,6 +178,27 @@ func main() {
 			log.Printf("warning: failed to start process watcher: %v", err)
 		} else {
 			watcherStarted = true
+		}
+	}
+
+	dockerWatcher, err := discovery.NewDockerWatcher()
+	if err != nil {
+		log.Printf("warning: docker watcher disabled: %v", err)
+	} else {
+		dockerWatcher.SetOnChange(func(containers []discovery.DockerContainer) {
+			log.Printf("docker containers changed: %d", len(containers))
+			routeRegistry.UpdateDockerContainers(containers)
+
+			if processWatcher != nil {
+				ports := make([]int, 0, len(containers))
+				for _, c := range containers {
+					ports = append(ports, c.Port)
+				}
+				processWatcher.SetDockerPorts(ports)
+			}
+		})
+		if err := dockerWatcher.Start(); err != nil {
+			log.Printf("warning: failed to start docker watcher: %v", err)
 		}
 	}
 

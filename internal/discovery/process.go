@@ -22,6 +22,7 @@ type ProcessWatcher struct {
 	mu                sync.RWMutex
 	current           map[int]ListeningProcess
 	currentWellKnown  map[int]WellKnownProcess
+	dockerPorts       map[int]bool
 }
 
 func NewProcessWatcher(basePaths []string) (*ProcessWatcher, error) {
@@ -42,6 +43,7 @@ func NewProcessWatcher(basePaths []string) (*ProcessWatcher, error) {
 		cancel:           cancel,
 		current:          make(map[int]ListeningProcess),
 		currentWellKnown: make(map[int]WellKnownProcess),
+		dockerPorts:      make(map[int]bool),
 	}, nil
 }
 
@@ -51,6 +53,15 @@ func (w *ProcessWatcher) SetOnChange(fn func([]ListeningProcess)) {
 
 func (w *ProcessWatcher) SetOnWellKnownChange(fn func([]WellKnownProcess)) {
 	w.onWellKnownChange = fn
+}
+
+func (w *ProcessWatcher) SetDockerPorts(ports []int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.dockerPorts = make(map[int]bool)
+	for _, port := range ports {
+		w.dockerPorts[port] = true
+	}
 }
 
 func (w *ProcessWatcher) Start() error {
@@ -229,6 +240,7 @@ func (w *ProcessWatcher) addWellKnownProcess(state *scanState, pid int, port int
 		Port:      port,
 		Subdomain: info.Subdomain,
 		TCPPort:   info.TCPPort,
+		IsDocker:  w.dockerPorts[port],
 	})
 	state.usedPorts[port] = true
 }
@@ -254,7 +266,6 @@ func (w *ProcessWatcher) handleUnknownCWD(state *scanState, pid int, port int) {
 
 func (w *ProcessWatcher) handleOutsideBasePath(state *scanState, cwd string, pid int, port int) {
 	w.addWellKnownProcess(state, pid, port)
-	w.addListeningProcess(state, pid, port, filepath.Base(cwd), cwd, true)
 }
 
 func (w *ProcessWatcher) buildSubdomain(basePath string, cwd string, ignoredDirs map[string]bool) (string, bool) {

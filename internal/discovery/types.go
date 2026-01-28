@@ -14,4 +14,5 @@ type WellKnownProcess struct {
 	Port      int
 	Subdomain string
 	TCPPort   int
+	IsDocker  bool
 }

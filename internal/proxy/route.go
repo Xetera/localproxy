@@ -20,4 +20,5 @@ type Route struct {
 	DockerHasAutoName  bool
 	DockerContainerID  string
 	NeedsCustomMapping bool
+	IsDocker           bool
 }
