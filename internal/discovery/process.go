@@ -2,6 +2,7 @@ package discovery
 
 import (
 	"context"
+	"log"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -319,6 +320,8 @@ func (w *ProcessWatcher) reverseAndJoin(parts []string) string {
 func (w *ProcessWatcher) discoverNewServices(targets []ScanTarget) {
 	ctx, cancel := context.WithTimeout(w.ctx, 30*time.Second)
 
+	log.Printf("process: starting service discovery for %d targets", len(targets))
+
 	results := make(chan []ServiceInfo, 1)
 	DiscoverServices(ctx, targets, results)
 
@@ -326,8 +329,18 @@ func (w *ProcessWatcher) discoverNewServices(targets []ScanTarget) {
 		defer cancel()
 
 		services, ok := <-results
-		if !ok || len(services) == 0 {
+		if !ok {
+			log.Printf("process: service discovery channel closed without results")
 			return
+		}
+		if len(services) == 0 {
+			log.Printf("process: service discovery returned 0 services")
+			return
+		}
+
+		log.Printf("process: discovered %d services", len(services))
+		for _, s := range services {
+			log.Printf("process: discovered service %s:%d protocol=%s", s.IP, s.Port, s.Protocol)
 		}
 
 		type serviceKey struct {
@@ -341,14 +354,27 @@ func (w *ProcessWatcher) discoverNewServices(targets []ScanTarget) {
 		}
 
 		w.mu.Lock()
-		defer w.mu.Unlock()
-
+		updated := false
 		for pid, svc := range w.current {
 			key := serviceKey{IP: svc.IP, Port: svc.Port}
 			if info, ok := serviceByKey[key]; ok {
+				log.Printf("process: assigning ServiceInfo to %s (pid %d): protocol=%s", svc.Subdomain, pid, info.Protocol)
 				svc.Service = info
 				w.current[pid] = svc
+				updated = true
 			}
 		}
+
+		if updated && w.onChange != nil {
+			var all []DiscoveredService
+			for _, svc := range w.current {
+				all = append(all, svc)
+			}
+			w.mu.Unlock()
+			log.Printf("process: triggering onChange with %d updated services", len(all))
+			w.onChange(all)
+			return
+		}
+		w.mu.Unlock()
 	}()
 }

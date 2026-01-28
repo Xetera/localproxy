@@ -243,15 +243,22 @@ func (w *DockerWatcher) waitForHealthy(containerID string) {
 }
 
 func (w *DockerWatcher) DiscoverServiceInfo(svc DiscoveredService, onDiscovered func(DiscoveredService)) {
+	log.Printf("docker: starting service discovery for %s at %s:%d", svc.Subdomain, svc.IP, svc.Port)
 	targets := []ScanTarget{{IP: svc.IP, Port: svc.Port}}
 	results := make(chan []ServiceInfo, 1)
 	DiscoverServices(w.ctx, targets, results)
 
 	go func() {
 		services, ok := <-results
-		if !ok || len(services) == 0 {
+		if !ok {
+			log.Printf("docker: service discovery channel closed for %s", svc.Subdomain)
 			return
 		}
+		if len(services) == 0 {
+			log.Printf("docker: no services discovered for %s", svc.Subdomain)
+			return
+		}
+		log.Printf("docker: discovered service for %s: protocol=%s", svc.Subdomain, services[0].Protocol)
 		svc.Service = &services[0]
 		onDiscovered(svc)
 	}()

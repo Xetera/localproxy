@@ -48,7 +48,12 @@ func (r *RouteRegistry) UpdateServices(source discovery.RouteSource, services []
 
 		svc.Subdomain = subdomain
 		r.services[subdomain] = svc
-		log.Printf("registry: %s route %s -> %s:%d", svc.Source, subdomain, svc.IP, svc.Port)
+		log.Printf("registry: %s route %s -> %s:%d protocol=%s", svc.Source, subdomain, svc.IP, svc.Port, func() string {
+			if svc.Service != nil {
+				return svc.Service.Protocol
+			}
+			return ""
+		}())
 	}
 
 	r.notifyChange()
@@ -105,6 +110,10 @@ func (r *RouteRegistry) getRoutesLocked() []proxy.Route {
 		if svc.Docker != nil {
 			route.DockerContainerID = svc.Docker.ID
 			route.DockerHasAutoName = !svc.Docker.HasCustomName
+		}
+
+		if svc.Service != nil {
+			route.ServiceProtocol = svc.Service.Protocol
 		}
 
 		routes = append(routes, route)

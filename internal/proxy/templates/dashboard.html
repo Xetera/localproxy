@@ -344,6 +344,11 @@
             <span
               >{{if .TCPPort}}tcp:{{.TCPPort}}{{else}}:{{.Port}}{{end}}</span
             >
+            {{if .ServiceProtocol}}
+            <div class="service-meta" style="margin-left: auto">
+              <span>{{.ServiceProtocol}}</span>
+            </div>
+            {{end}}
           </div>
         </div>
         {{end}} {{end}} {{if or .ProcessGroups .UngroupedProcesses}}
@@ -372,7 +377,13 @@
                 >{{if .TCPPort}}tcp:{{.TCPPort}}{{else}}:{{.Port}}{{end}}</span
               >
               {{if .DisplayPath}}
-              <div class="service-path" title="{{.DisplayPath}}">{{.DisplayPath}}</div>
+              <div class="service-path" title="{{.DisplayPath}}">
+                {{.DisplayPath}}
+              </div>
+              {{end}} {{if .ServiceProtocol}}
+              <div class="service-meta" style="margin-left: auto">
+                <span>{{.ServiceProtocol}}</span>
+              </div>
               {{end}}
             </div>
           </div>
@@ -394,6 +405,11 @@
             <span
               >{{if .TCPPort}}tcp:{{.TCPPort}}{{else}}:{{.Port}}{{end}}</span
             >
+            {{if .ServiceProtocol}}
+            <div class="service-meta" style="margin-left: auto">
+              <span>{{.ServiceProtocol}}</span>
+            </div>
+            {{end}}
           </div>
         </div>
         {{end}} {{end}} {{if .WellKnownRoutes}}
@@ -435,7 +451,12 @@
               >{{if .Subdomain}}auto{{else}}self{{end}}</span
             >
             <span>:{{.Port}}</span>
-            {{if .TCPPort}}<span>tcp:{{.TCPPort}}</span>{{end}}
+            {{if .TCPPort}}<span>tcp:{{.TCPPort}}</span>{{end}} {{if
+            .ServiceProtocol}}
+            <div class="service-meta" style="margin-left: auto">
+              <span>{{.ServiceProtocol}}</span>
+            </div>
+            {{end}}
           </div>
         </div>
         {{end}} {{end}} {{if .DisabledRoutes}}
@@ -457,7 +478,8 @@
             >
           </div>
         </div>
-        {{end}} {{end}} {{if and (not .DockerRoutes) (not .ProcessGroups) (not .UngroupedProcesses) (not .WellKnownRoutes) (not .DisabledRoutes)}}
+        {{end}} {{end}} {{if and (not .DockerRoutes) (not .ProcessGroups) (not
+        .UngroupedProcesses) (not .WellKnownRoutes) (not .DisabledRoutes)}}
         <div class="detail-empty">No active services</div>
         {{end}}
       </div>

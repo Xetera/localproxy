@@ -175,6 +175,12 @@ func main() {
 			log.Printf("docker containers changed: %d", len(services))
 			routeRegistry.UpdateServices(discovery.RouteSourceDocker, services)
 
+			for _, svc := range services {
+				dockerWatcher.DiscoverServiceInfo(svc, func(updated discovery.DiscoveredService) {
+					routeRegistry.UpdateServices(discovery.RouteSourceDocker, []discovery.DiscoveredService{updated})
+				})
+			}
+
 			if processWatcher != nil {
 				ports := make([]int, 0, len(services))
 				for _, s := range services {

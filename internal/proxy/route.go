@@ -15,4 +15,5 @@ type Route struct {
 	DockerContainerID  string
 	NeedsCustomMapping bool
 	IsDocker           bool
+	ServiceProtocol    string
 }
