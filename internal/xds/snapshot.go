@@ -1,6 +1,7 @@
 package xds
 
 import (
+	_ "embed"
 	"fmt"
 	"net"
 	"time"
@@ -22,6 +23,9 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
+
+//go:embed templates/404.html
+var notFoundHTML string
 
 type Protocol string
 
@@ -223,6 +227,32 @@ func (b *SnapshotBuilder) Build(routes []Route, certPath, keyPath string, httpsR
 	}
 
 	var routeConfigs []types.Resource
+
+	virtualHosts = append(virtualHosts, &route.VirtualHost{
+		Name:    "vhost_fallback",
+		Domains: []string{"*"},
+		Routes: []*route.Route{{
+			Match: &route.RouteMatch{
+				PathSpecifier: &route.RouteMatch_Prefix{Prefix: "/"},
+			},
+			Action: &route.Route_DirectResponse{
+				DirectResponse: &route.DirectResponseAction{
+					Status: 404,
+					Body: &core.DataSource{
+						Specifier: &core.DataSource_InlineString{
+							InlineString: notFoundHTML,
+						},
+					},
+				},
+			},
+			ResponseHeadersToAdd: []*core.HeaderValueOption{{
+				Header: &core.HeaderValue{
+					Key:   "content-type",
+					Value: "text/html; charset=utf-8",
+				},
+			}},
+		}},
+	})
 
 	if len(virtualHosts) > 0 {
 		routeConfigs = append(routeConfigs, &route.RouteConfiguration{
