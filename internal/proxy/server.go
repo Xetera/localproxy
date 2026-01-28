@@ -118,7 +118,8 @@ func (s *DashboardServer) Stop() error {
 
 type RouteWithLogs struct {
 	Route
-	RecentLogs []string
+	RecentLogs  []string
+	DisplayPath string
 }
 
 type ProcessGroup struct {
@@ -130,11 +131,7 @@ type ProcessGroup struct {
 func trimBasePath(cwd string, basePaths []string) string {
 	for _, base := range basePaths {
 		if trimmed, ok := strings.CutPrefix(cwd, base); ok {
-			trimmed = strings.TrimPrefix(trimmed, "/")
-			if idx := strings.Index(trimmed, "/"); idx != -1 {
-				return trimmed[:idx]
-			}
-			return trimmed
+			return strings.TrimPrefix(trimmed, "/")
 		}
 	}
 	return cwd
@@ -201,6 +198,11 @@ func (s *DashboardServer) serveDashboard(w http.ResponseWriter, r *http.Request)
 			otherDisabledRoutes = append(otherDisabledRoutes, r)
 		}
 	}
+
+	for i := range processRoutes {
+		processRoutes[i].DisplayPath = trimBasePath(processRoutes[i].Cwd, basePaths)
+	}
+
 	sort.Slice(wellKnownRoutes, func(i, j int) bool {
 		return wellKnownRoutes[i].Subdomain < wellKnownRoutes[j].Subdomain
 	})
@@ -212,7 +214,11 @@ func (s *DashboardServer) serveDashboard(w http.ResponseWriter, r *http.Request)
 	var processRoutesWithDisplay []routeWithDisplayCwd
 	displayCwdCounts := make(map[string]int)
 	for _, r := range processRoutes {
-		displayCwd := trimBasePath(r.Cwd, basePaths)
+		trimmed := trimBasePath(r.Cwd, basePaths)
+		displayCwd := trimmed
+		if idx := strings.Index(trimmed, "/"); idx != -1 {
+			displayCwd = trimmed[:idx]
+		}
 		processRoutesWithDisplay = append(processRoutesWithDisplay, routeWithDisplayCwd{
 			route:      r,
 			displayCwd: displayCwd,

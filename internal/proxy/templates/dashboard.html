@@ -83,6 +83,15 @@
         align-items: center;
         gap: 0.25rem;
       }
+      .service-path {
+        font-size: 0.75rem;
+        color: #525252;
+        margin-left: 0.5rem;
+        max-width: 150px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
       .badge {
         display: inline-block;
         padding: 0.125rem 0.5rem;
@@ -362,6 +371,9 @@
               <span
                 >{{if .TCPPort}}tcp:{{.TCPPort}}{{else}}:{{.Port}}{{end}}</span
               >
+              {{if .DisplayPath}}
+              <div class="service-path" title="{{.DisplayPath}}">{{.DisplayPath}}</div>
+              {{end}}
             </div>
           </div>
         </div>

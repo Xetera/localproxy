@@ -112,11 +112,19 @@ func (w *ProcessWatcher) watchLoop() {
 
 			w.mu.Lock()
 			changed := len(processes) != len(w.current)
+			var newTargets []ScanTarget
 			if !changed {
 				for _, p := range processes {
 					if existing, ok := w.current[p.PID]; !ok || existing.Port != p.Port {
 						changed = true
 						break
+					}
+				}
+			}
+			if changed {
+				for _, p := range processes {
+					if _, ok := w.current[p.PID]; !ok {
+						newTargets = append(newTargets, ScanTarget{IP: p.IP, Port: p.Port})
 					}
 				}
 			}
@@ -146,6 +154,10 @@ func (w *ProcessWatcher) watchLoop() {
 			}
 
 			w.mu.Unlock()
+
+			if len(newTargets) > 0 {
+				w.discoverNewServices(newTargets)
+			}
 
 			if changed && w.onChange != nil {
 				w.onChange(processes)
@@ -252,6 +264,7 @@ func (w *ProcessWatcher) addListeningProcess(state *scanState, pid int, port int
 	state.results = append(state.results, ListeningProcess{
 		PID:                pid,
 		Port:               port,
+		IP:                 "127.0.0.1",
 		Subdomain:          subdomain,
 		Cwd:                cwd,
 		Disabled:           needsCustomMapping,
@@ -304,8 +317,39 @@ func (w *ProcessWatcher) filterPathParts(parts []string, ignoredDirs map[string]
 
 func (w *ProcessWatcher) reverseAndJoin(parts []string) string {
 	reversed := make([]string, len(parts))
-	for i := 0; i < len(parts); i++ {
+	for i := range parts {
 		reversed[i] = parts[len(parts)-1-i]
 	}
 	return strings.Join(reversed, ".")
+}
+
+func (w *ProcessWatcher) discoverNewServices(targets []ScanTarget) {
+	ctx, cancel := context.WithTimeout(w.ctx, 30*time.Second)
+	defer cancel()
+
+	services, err := DiscoverServices(ctx, targets)
+	if err != nil {
+		return
+	}
+
+	type serviceKey struct {
+		IP   string
+		Port int
+	}
+	serviceByKey := make(map[serviceKey]*ServiceInfo)
+	for i := range services {
+		key := serviceKey{IP: services[i].IP, Port: services[i].Port}
+		serviceByKey[key] = &services[i]
+	}
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	for pid, proc := range w.current {
+		key := serviceKey{IP: proc.IP, Port: proc.Port}
+		if svc, ok := serviceByKey[key]; ok {
+			proc.Service = svc
+			w.current[pid] = proc
+		}
+	}
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -191,9 +192,16 @@ func main() {
 
 			if processWatcher != nil {
 				ports := make([]int, 0, len(containers))
+				targets := make([]discovery.ScanTarget, 0)
 				for _, c := range containers {
 					ports = append(ports, c.Port)
+					targets = append(targets, discovery.ScanTarget{
+						IP:   c.IP,
+						Port: c.Port,
+					})
 				}
+				discovery.DiscoverServices(context.Background(), targets)
+
 				processWatcher.SetDockerPorts(ports)
 			}
 		})
