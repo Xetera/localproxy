@@ -46,7 +46,7 @@ func NewSnapshotBuilder() *SnapshotBuilder {
 	return &SnapshotBuilder{version: 0}
 }
 
-func (b *SnapshotBuilder) Build(routes []Route, certPath, keyPath string) (*cache.Snapshot, error) {
+func (b *SnapshotBuilder) Build(routes []Route, certPath, keyPath string, httpsRedirect bool) (*cache.Snapshot, error) {
 	b.version++
 	versionStr := fmt.Sprintf("%d", b.version)
 
@@ -262,24 +262,57 @@ func (b *SnapshotBuilder) Build(routes []Route, certPath, keyPath string) (*cach
 			}},
 		})
 
-		httpHcm := &hcm.HttpConnectionManager{
-			CodecType:  hcm.HttpConnectionManager_AUTO,
-			StatPrefix: "http_ingress",
-			RouteSpecifier: &hcm.HttpConnectionManager_Rds{
-				Rds: &hcm.Rds{
-					ConfigSource: &core.ConfigSource{
-						ResourceApiVersion: core.ApiVersion_V3,
-						ConfigSourceSpecifier: &core.ConfigSource_Ads{
-							Ads: &core.AggregatedConfigSource{},
-						},
+		var httpHcm *hcm.HttpConnectionManager
+		if httpsRedirect {
+			httpHcm = &hcm.HttpConnectionManager{
+				CodecType:  hcm.HttpConnectionManager_AUTO,
+				StatPrefix: "http_ingress",
+				RouteSpecifier: &hcm.HttpConnectionManager_RouteConfig{
+					RouteConfig: &route.RouteConfiguration{
+						Name: "http_redirect_route",
+						VirtualHosts: []*route.VirtualHost{{
+							Name:    "redirect_all",
+							Domains: []string{"*"},
+							Routes: []*route.Route{{
+								Match: &route.RouteMatch{
+									PathSpecifier: &route.RouteMatch_Prefix{Prefix: "/"},
+								},
+								Action: &route.Route_Redirect{
+									Redirect: &route.RedirectAction{
+										SchemeRewriteSpecifier: &route.RedirectAction_HttpsRedirect{
+											HttpsRedirect: true,
+										},
+									},
+								},
+							}},
+						}},
 					},
-					RouteConfigName: "local_route",
 				},
-			},
-			HttpFilters: []*hcm.HttpFilter{{
-				Name:       "envoy.filters.http.router",
-				ConfigType: &hcm.HttpFilter_TypedConfig{TypedConfig: routerFilter},
-			}},
+				HttpFilters: []*hcm.HttpFilter{{
+					Name:       "envoy.filters.http.router",
+					ConfigType: &hcm.HttpFilter_TypedConfig{TypedConfig: routerFilter},
+				}},
+			}
+		} else {
+			httpHcm = &hcm.HttpConnectionManager{
+				CodecType:  hcm.HttpConnectionManager_AUTO,
+				StatPrefix: "http_ingress",
+				RouteSpecifier: &hcm.HttpConnectionManager_Rds{
+					Rds: &hcm.Rds{
+						ConfigSource: &core.ConfigSource{
+							ResourceApiVersion: core.ApiVersion_V3,
+							ConfigSourceSpecifier: &core.ConfigSource_Ads{
+								Ads: &core.AggregatedConfigSource{},
+							},
+						},
+						RouteConfigName: "local_route",
+					},
+				},
+				HttpFilters: []*hcm.HttpFilter{{
+					Name:       "envoy.filters.http.router",
+					ConfigType: &hcm.HttpFilter_TypedConfig{TypedConfig: routerFilter},
+				}},
+			}
 		}
 		httpHcmAny, _ := anypb.New(httpHcm)
 

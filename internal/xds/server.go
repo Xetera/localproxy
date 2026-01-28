@@ -20,10 +20,11 @@ import (
 const nodeID = "localproxy-envoy"
 
 type Server struct {
-	grpcServer *grpc.Server
-	xdsServer  server.Server
-	cache      cache.SnapshotCache
-	snapshot   *SnapshotBuilder
+	grpcServer    *grpc.Server
+	xdsServer     server.Server
+	cache         cache.SnapshotCache
+	snapshot      *SnapshotBuilder
+	httpsRedirect bool
 }
 
 func NewServer() *Server {
@@ -61,8 +62,12 @@ func (s *Server) Stop() {
 	s.grpcServer.GracefulStop()
 }
 
+func (s *Server) SetHTTPSRedirect(enabled bool) {
+	s.httpsRedirect = enabled
+}
+
 func (s *Server) UpdateSnapshot(routes []Route, certPath, keyPath string) error {
-	snap, err := s.snapshot.Build(routes, certPath, keyPath)
+	snap, err := s.snapshot.Build(routes, certPath, keyPath, s.httpsRedirect)
 	if err != nil {
 		return fmt.Errorf("failed to build snapshot: %w", err)
 	}

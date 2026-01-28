@@ -25,10 +25,12 @@ const defaultBasePath = "/Users/xetera"
 
 var watchPaths []string
 var logLevel string
+var httpsRedirect bool
 
 func init() {
 	pflag.StringArrayVar(&watchPaths, "watch", []string{}, "Paths to watch for processes (can be specified multiple times)")
 	pflag.StringVar(&logLevel, "log-level", "info", "Envoy log level (trace, debug, info, warning, error, critical, off)")
+	pflag.BoolVar(&httpsRedirect, "https-redirect", false, "Redirect HTTP requests to HTTPS")
 	pflag.Parse()
 }
 
@@ -59,6 +61,7 @@ func main() {
 	certPath, keyPath := certMgr.GetWildcardCert()
 
 	xdsServer := xds.NewServer()
+	xdsServer.SetHTTPSRedirect(httpsRedirect)
 	if err := xdsServer.Start(":18000"); err != nil {
 		log.Fatalf("failed to start xds server: %v", err)
 	}
