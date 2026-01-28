@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"fmt"
 	"log"
 	"maps"
 	"sync"
@@ -57,14 +58,19 @@ func (r *RouteRegistry) UpdateProcesses(processes []discovery.ListeningProcess) 
 
 	r.processRoutes = make(map[string]proxy.Route)
 	for _, p := range processes {
-		r.processRoutes[p.Subdomain] = proxy.Route{
-			Subdomain: p.Subdomain,
-			Host:      "127.0.0.1",
-			Port:      p.Port,
-			PID:       p.PID,
-			Cwd:       p.Cwd,
-			Disabled:  p.Disabled,
-			Source:    proxy.RouteSourceProcess,
+		subdomain := p.Subdomain
+		if p.NeedsCustomMapping {
+			subdomain = fmt.Sprintf("pid-%d", p.PID)
+		}
+		r.processRoutes[subdomain] = proxy.Route{
+			Subdomain:          subdomain,
+			Host:               "127.0.0.1",
+			Port:               p.Port,
+			PID:                p.PID,
+			Cwd:                p.Cwd,
+			Disabled:           p.Disabled,
+			Source:             proxy.RouteSourceProcess,
+			NeedsCustomMapping: p.NeedsCustomMapping,
 		}
 	}
 

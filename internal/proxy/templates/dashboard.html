@@ -356,6 +356,9 @@
               <div class="log-count" id="count-{{.Subdomain}}">0 lines</div>
             </div>
             <div class="service-meta">
+              {{if .NeedsCustomMapping}}
+              <span class="badge badge-warning">needs mapping</span>
+              {{end}}
               <span
                 >{{if .TCPPort}}tcp:{{.TCPPort}}{{else}}:{{.Port}}{{end}}</span
               >
@@ -373,6 +376,9 @@
             <div class="log-count" id="count-{{.Subdomain}}">0 lines</div>
           </div>
           <div class="service-meta">
+            {{if .NeedsCustomMapping}}
+            <span class="badge badge-warning">needs mapping</span>
+            {{end}}
             <span
               >{{if .TCPPort}}tcp:{{.TCPPort}}{{else}}:{{.Port}}{{end}}</span
             >

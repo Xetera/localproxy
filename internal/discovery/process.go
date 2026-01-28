@@ -192,12 +192,12 @@ func (w *ProcessWatcher) processEntry(state *scanState, entry portEntry) {
 		return
 	}
 
-	subdomain, disabled := w.buildSubdomain(basePath, cwd, state.ignoredDirs)
-	if subdomain == "" {
+	subdomain, needsCustomMapping := w.buildSubdomain(basePath, cwd, state.ignoredDirs)
+	if subdomain == "" && !needsCustomMapping {
 		return
 	}
 
-	w.addListeningProcess(state, pid, port, subdomain, cwd, disabled)
+	w.addListeningProcess(state, pid, port, subdomain, cwd, needsCustomMapping)
 	state.usedPorts[port] = true
 }
 
@@ -233,16 +233,17 @@ func (w *ProcessWatcher) addWellKnownProcess(state *scanState, pid int, port int
 	state.usedPorts[port] = true
 }
 
-func (w *ProcessWatcher) addListeningProcess(state *scanState, pid int, port int, subdomain string, cwd string, disabled bool) {
+func (w *ProcessWatcher) addListeningProcess(state *scanState, pid int, port int, subdomain string, cwd string, needsCustomMapping bool) {
 	if state.seenPID[pid] {
 		return
 	}
 	state.results = append(state.results, ListeningProcess{
-		PID:       pid,
-		Port:      port,
-		Subdomain: subdomain,
-		Cwd:       cwd,
-		Disabled:  disabled,
+		PID:                pid,
+		Port:               port,
+		Subdomain:          subdomain,
+		Cwd:                cwd,
+		Disabled:           needsCustomMapping,
+		NeedsCustomMapping: needsCustomMapping,
 	})
 	state.seenPID[pid] = true
 }
@@ -272,9 +273,12 @@ func (w *ProcessWatcher) buildSubdomain(basePath string, cwd string, ignoredDirs
 		return "", false
 	}
 
-	subdomain := w.reverseAndJoin(filteredParts)
-	disabled := len(filteredParts) > 2
-	return subdomain, disabled
+	if len(filteredParts) == 1 {
+		subdomain := filteredParts[0]
+		return subdomain, false
+	}
+
+	return "", true
 }
 
 func (w *ProcessWatcher) filterPathParts(parts []string, ignoredDirs map[string]bool) []string {
