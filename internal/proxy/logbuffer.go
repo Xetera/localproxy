@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	_ "embed"
 	"io"
 	"log"
 	"os/exec"
@@ -17,6 +18,9 @@ import (
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/xetera/localproxy/internal/discovery"
 )
+
+//go:embed trace.d
+var dtraceScript string
 
 type LogBuffer struct {
 	lines []string
@@ -108,11 +112,11 @@ func (lm *LogManager) StartTracing(key string, pid int) {
 		return
 	}
 
-	_, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
 	lm.tracers[key] = cancel
 	lm.tracerMu.Unlock()
 
-	// go lm.traceProcess(ctx, key, pid)
+	go lm.traceProcess(ctx, key, pid)
 }
 
 func (lm *LogManager) StartDockerLogs(containerID string) {
@@ -148,22 +152,32 @@ func (lm *LogManager) traceProcess(ctx context.Context, key string, pid int) {
 	buffer := lm.GetBuffer(key)
 	pidStr := strconv.Itoa(pid)
 
-	dtrace := exec.CommandContext(ctx, "sudo", "dtrace", "-p", pidStr, "-qn",
-		`syscall::write*:entry
-		/pid == $target && arg0 == 1/ {
-			printf("%s", copyinstr(arg1, arg2));
-		}`)
+	dtrace := exec.CommandContext(ctx, "sudo", "dtrace", "-p", pidStr, "-C", "-s", "/dev/stdin", pidStr)
+	stdin, err := dtrace.StdinPipe()
+	if err != nil {
+		log.Printf("dtrace: failed to create stdin pipe for pid %d: %v", pid, err)
+		return
+	}
 
 	stdout, err := dtrace.StdoutPipe()
 	if err != nil {
+		stdin.Close()
 		log.Printf("dtrace: failed to create stdout pipe for pid %d: %v", pid, err)
 		return
 	}
 
 	if err := dtrace.Start(); err != nil {
+		stdin.Close()
 		log.Printf("dtrace: failed to start for pid %d: %v", pid, err)
 		return
 	}
+
+	if _, err := stdin.Write([]byte(dtraceScript)); err != nil {
+		log.Printf("dtrace: failed to write script for pid %d: %v", pid, err)
+		stdin.Close()
+		return
+	}
+	stdin.Close()
 
 	log.Printf("dtrace: started tracing pid %d", pid)
 
