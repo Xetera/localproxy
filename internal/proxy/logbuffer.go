@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
-	"fmt"
 	"io"
 	"log"
 	"os/exec"
@@ -271,18 +270,18 @@ func (lm *LogManager) drainBuffer(buffer *LogBuffer, src *bytes.Buffer) {
 func (lm *LogManager) UpdateRoutes(routes []Route) {
 	activeKeys := make(map[string]bool)
 
+	if !lm.traceProcessLogs {
+		log.Println("logmanager: Skipping process tracing because it wasn't turned on with `--trace-process-logs`")
+	}
+
 	for _, route := range routes {
 		if route.Source == discovery.RouteSourceDocker && route.DockerContainerID != "" {
 			key := "docker:" + route.DockerContainerID
 			activeKeys[key] = true
 			lm.StartDockerLogs(route.DockerContainerID)
-		} else if route.PID > 0 {
+		} else if lm.traceProcessLogs && route.PID > 0 {
 			key := "pid:" + strconv.Itoa(route.PID)
 			activeKeys[key] = true
-			if !lm.traceProcessLogs {
-				fmt.Println("Skipping process tracing because it wasn't turned on with `--trace-process-logs`")
-				continue
-			}
 			lm.StartTracing(key, route.PID)
 		}
 	}

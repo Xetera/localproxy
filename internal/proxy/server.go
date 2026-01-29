@@ -57,10 +57,10 @@ type DashboardServer struct {
 	basePaths  []string
 }
 
-func NewDashboardServer(basePaths []string) *DashboardServer {
+func NewDashboardServer(basePaths []string, traceProcessLogs bool) *DashboardServer {
 	s := &DashboardServer{
 		routes:     make(map[string]Route),
-		logManager: NewLogManager(),
+		logManager: NewLogManager(traceProcessLogs),
 		basePaths:  basePaths,
 	}
 

@@ -3,6 +3,7 @@ package discovery
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/netip"
 	"strings"
 	"time"
@@ -59,23 +60,23 @@ func DiscoverServices(ctx context.Context, targets []ScanTarget, results chan<- 
 				}
 			}
 
-			fmt.Printf("fingerprint: scanning %d targets (attempt %d)\n", len(t), attempt+1)
+			log.Printf("fingerprint: scanning %d targets (attempt %d)\n", len(t), attempt+1)
 			scanned, err := scan.ScanTargets(t, scan.Config{
 				UDP:            false,
 				FastMode:       false,
-				Verbose:        true,
+				Verbose:        false,
 				DefaultTimeout: time.Second,
 			})
 			if err != nil {
-				fmt.Printf("scan error (attempt %d): %v\n", attempt+1, err)
+				log.Printf("fingerprint: scan error (attempt %d): %v\n", attempt+1, err)
 				continue
 			}
 
-			fmt.Printf("fingerprint: scan returned %d results\n", len(scanned))
+			log.Printf("fingerprint: scan returned %d results\n", len(scanned))
 			if len(scanned) > 0 {
 				var services []ServiceInfo
 				for _, s := range scanned {
-					fmt.Println("Discovered services", s.IP, s.Port, s.Protocol)
+					log.Printf("	%s:%d (%s)\n", s.IP, s.Port, s.Protocol)
 					services = append(services, ServiceInfo{
 						IP:       s.IP,
 						Port:     s.Port,

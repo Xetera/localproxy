@@ -225,7 +225,6 @@ func main() {
 	if processWatcher != nil {
 		processWatcher.Stop()
 	}
-	logManager
 	envoyMgr.Stop()
 	dashboardServer.Stop()
 	xdsServer.Stop()
