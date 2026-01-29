@@ -206,7 +206,7 @@ func (w *ProcessWatcher) processEntry(state *scanState, entry portEntry) {
 		return
 	}
 
-	w.addListeningProcess(state, pid, port, subdomain, cwd, needsCustomMapping)
+	w.addListeningProcess(state, pid, port, ip, subdomain, cwd, needsCustomMapping)
 	state.usedPorts[port] = true
 }
 
@@ -248,14 +248,14 @@ func (w *ProcessWatcher) addWellKnownProcess(state *scanState, pid int, port int
 	state.usedPorts[port] = true
 }
 
-func (w *ProcessWatcher) addListeningProcess(state *scanState, pid int, port int, subdomain string, cwd string, needsCustomMapping bool) {
+func (w *ProcessWatcher) addListeningProcess(state *scanState, pid int, port int, ip string, subdomain string, cwd string, needsCustomMapping bool) {
 	if state.seenPID[pid] {
 		return
 	}
 	state.results = append(state.results, DiscoveredService{
 		Subdomain: subdomain,
 		Port:      port,
-		IP:        "127.0.0.1",
+		IP:        ip,
 		Source:    RouteSourceProcess,
 		Process: &ProcessInfo{
 			PID:                pid,

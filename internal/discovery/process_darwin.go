@@ -24,6 +24,7 @@ import "C"
 
 import (
 	"bufio"
+	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -82,7 +83,10 @@ func (w *ProcessWatcher) getListeningPorts() ([]portEntry, error) {
 		ipStr := addr[:colonIdx]
 		if ipStr == "*" {
 			ipStr = "127.0.0.1"
+		} else if strings.HasPrefix(ipStr, "[") && strings.HasSuffix(ipStr, "]") {
+			ipStr = ipStr[1 : len(ipStr)-1]
 		}
+		fmt.Println("IP", ipStr)
 
 		result = append(result, portEntry{PID: pid, Port: port, IP: ipStr})
 	}

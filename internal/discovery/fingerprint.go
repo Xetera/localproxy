@@ -61,11 +61,14 @@ func DiscoverServices(ctx context.Context, targets []ScanTarget, results chan<- 
 			}
 
 			log.Printf("fingerprint: scanning %d targets (attempt %d)\n", len(t), attempt+1)
+			for _, target := range t {
+				log.Printf("	Scanning target %s\n", target.Address.String())
+			}
 			scanned, err := scan.ScanTargets(t, scan.Config{
 				UDP:            false,
 				FastMode:       false,
 				Verbose:        false,
-				DefaultTimeout: time.Second,
+				DefaultTimeout: 2 * time.Second,
 			})
 			if err != nil {
 				log.Printf("fingerprint: scan error (attempt %d): %v\n", attempt+1, err)
