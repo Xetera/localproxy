@@ -67,7 +67,7 @@ func NewDashboardServer(basePaths []string) *DashboardServer {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", s.serveDashboard)
+	mux.HandleFunc("/", s.handleRoot)
 	mux.HandleFunc("/logs", s.serveLogs)
 	mux.HandleFunc("/api/logs-preview", s.serveLogsPreview)
 
@@ -85,6 +85,48 @@ func (s *DashboardServer) SetBasePaths(paths []string) {
 	s.routesMu.Lock()
 	defer s.routesMu.Unlock()
 	s.basePaths = paths
+}
+
+func (s *DashboardServer) handleRoot(w http.ResponseWriter, r *http.Request) {
+	host := r.Host
+	if fwdHost := r.Header.Get("X-Forwarded-Host"); fwdHost != "" {
+		host = fwdHost
+	}
+
+	if host == "proxy.localhost" || host == "proxy.internal" || host == fmt.Sprintf("127.0.0.1:%d", ServerPort) {
+		s.serveDashboard(w, r)
+		return
+	}
+
+	s.serve404(w, r, host)
+}
+
+func (s *DashboardServer) serve404(w http.ResponseWriter, r *http.Request, host string) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+
+	templatesPath := getTemplatesPath()
+	tmpl, err := template.ParseFiles(filepath.Join(templatesPath, "404.html"))
+	if err != nil {
+		http.Error(w, fmt.Sprintf("template error: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	subdomain := ""
+	if strings.HasSuffix(host, ".proxy.localhost") {
+		subdomain = strings.TrimSuffix(host, ".proxy.localhost")
+	} else if strings.HasSuffix(host, ".proxy.internal") {
+		subdomain = strings.TrimSuffix(host, ".proxy.internal")
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusNotFound)
+	tmpl.Execute(w, map[string]interface{}{
+		"Host":      host,
+		"Subdomain": subdomain,
+	})
 }
 
 func (s *DashboardServer) UpdateRoutes(routes []Route) {

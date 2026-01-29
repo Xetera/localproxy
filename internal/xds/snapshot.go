@@ -1,7 +1,6 @@
 package xds
 
 import (
-	_ "embed"
 	"fmt"
 	"net"
 	"time"
@@ -23,9 +22,6 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
-
-//go:embed templates/404.html
-var notFoundHTML string
 
 type Protocol string
 
@@ -235,20 +231,15 @@ func (b *SnapshotBuilder) Build(routes []Route, certPath, keyPath string, httpsR
 			Match: &route.RouteMatch{
 				PathSpecifier: &route.RouteMatch_Prefix{Prefix: "/"},
 			},
-			Action: &route.Route_DirectResponse{
-				DirectResponse: &route.DirectResponseAction{
-					Status: 404,
-					Body: &core.DataSource{
-						Specifier: &core.DataSource_InlineString{
-							InlineString: notFoundHTML,
-						},
-					},
+			Action: &route.Route_Route{
+				Route: &route.RouteAction{
+					ClusterSpecifier: &route.RouteAction_Cluster{Cluster: "cluster_root"},
 				},
 			},
-			ResponseHeadersToAdd: []*core.HeaderValueOption{{
+			RequestHeadersToAdd: []*core.HeaderValueOption{{
 				Header: &core.HeaderValue{
-					Key:   "content-type",
-					Value: "text/html; charset=utf-8",
+					Key:   "X-Forwarded-Host",
+					Value: "%REQ(:authority)%",
 				},
 			}},
 		}},
