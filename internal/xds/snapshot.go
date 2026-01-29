@@ -254,8 +254,11 @@ func (b *SnapshotBuilder) Build(routes []Route, certPath, keyPath string, httpsR
 		})
 
 		httpsHcm := &hcm.HttpConnectionManager{
-			CodecType:  hcm.HttpConnectionManager_AUTO,
-			StatPrefix: "https_ingress",
+			CodecType:             hcm.HttpConnectionManager_AUTO,
+			StatPrefix:            "https_ingress",
+			StreamIdleTimeout:     durationpb.New(0),
+			RequestTimeout:        durationpb.New(0),
+			RequestHeadersTimeout: durationpb.New(0),
 			RouteSpecifier: &hcm.HttpConnectionManager_Rds{
 				Rds: &hcm.Rds{
 					ConfigSource: &core.ConfigSource{
@@ -288,8 +291,11 @@ func (b *SnapshotBuilder) Build(routes []Route, certPath, keyPath string, httpsR
 		var httpHcm *hcm.HttpConnectionManager
 		if httpsRedirect {
 			httpHcm = &hcm.HttpConnectionManager{
-				CodecType:  hcm.HttpConnectionManager_AUTO,
-				StatPrefix: "http_ingress",
+				CodecType:             hcm.HttpConnectionManager_AUTO,
+				StatPrefix:            "http_ingress",
+				StreamIdleTimeout:     durationpb.New(0),
+				RequestTimeout:        durationpb.New(0),
+				RequestHeadersTimeout: durationpb.New(0),
 				RouteSpecifier: &hcm.HttpConnectionManager_RouteConfig{
 					RouteConfig: &route.RouteConfiguration{
 						Name: "http_redirect_route",
@@ -318,8 +324,11 @@ func (b *SnapshotBuilder) Build(routes []Route, certPath, keyPath string, httpsR
 			}
 		} else {
 			httpHcm = &hcm.HttpConnectionManager{
-				CodecType:  hcm.HttpConnectionManager_AUTO,
-				StatPrefix: "http_ingress",
+				CodecType:             hcm.HttpConnectionManager_AUTO,
+				StatPrefix:            "http_ingress",
+				StreamIdleTimeout:     durationpb.New(0),
+				RequestTimeout:        durationpb.New(0),
+				RequestHeadersTimeout: durationpb.New(0),
 				RouteSpecifier: &hcm.HttpConnectionManager_Rds{
 					Rds: &hcm.Rds{
 						ConfigSource: &core.ConfigSource{
@@ -390,8 +399,11 @@ func (b *SnapshotBuilder) Build(routes []Route, certPath, keyPath string, httpsR
 			FilterChains: httpsFilterChains,
 		})
 		http3Hcm := &hcm.HttpConnectionManager{
-			CodecType:  hcm.HttpConnectionManager_HTTP3,
-			StatPrefix: "http3_ingress",
+			CodecType:             hcm.HttpConnectionManager_HTTP3,
+			StatPrefix:            "http3_ingress",
+			StreamIdleTimeout:     durationpb.New(0),
+			RequestTimeout:        durationpb.New(0),
+			RequestHeadersTimeout: durationpb.New(0),
 			RouteSpecifier: &hcm.HttpConnectionManager_Rds{
 				Rds: &hcm.Rds{
 					ConfigSource: &core.ConfigSource{
