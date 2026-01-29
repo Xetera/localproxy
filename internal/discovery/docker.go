@@ -105,7 +105,17 @@ func (w *DockerWatcher) parseContainer(c container.Summary) *DiscoveredService {
 
 	var port int
 	var tcpPort int
-	var ip string = "127.0.0.1"
+	var ip string
+
+	for _, net := range c.NetworkSettings.Networks {
+		if net.IPAddress != "" {
+			ip = net.IPAddress
+			break
+		}
+	}
+	if ip == "" {
+		ip = "127.0.0.1"
+	}
 
 	if portStr, ok := c.Labels[LabelPort]; ok {
 		port, _ = strconv.Atoi(portStr)
@@ -115,22 +125,17 @@ func (w *DockerWatcher) parseContainer(c container.Summary) *DiscoveredService {
 		tcpPort, _ = strconv.Atoi(tcpPortStr)
 	}
 
-	if port == 0 && len(c.Ports) > 0 {
+	if port == 0 {
 		for _, p := range c.Ports {
 			if p.PublicPort > 0 {
 				port = int(p.PublicPort)
+				ip = "127.0.0.1"
 				break
 			}
 		}
 
-		if port == 0 {
-			for _, net := range c.NetworkSettings.Networks {
-				if net.IPAddress != "" {
-					ip = net.IPAddress
-					port = int(c.Ports[0].PrivatePort)
-					break
-				}
-			}
+		if port == 0 && len(c.Ports) > 0 {
+			port = int(c.Ports[0].PrivatePort)
 		}
 	}
 
