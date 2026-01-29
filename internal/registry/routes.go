@@ -129,3 +129,24 @@ func (r *RouteRegistry) notifyChange() {
 		r.onChange(routes)
 	}
 }
+
+func (r *RouteRegistry) UpdateService(svc discovery.DiscoveredService) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	subdomain := svc.Subdomain
+	existing, exists := r.services[subdomain]
+	if exists && r.priority(existing.Source) > r.priority(svc.Source) {
+		return
+	}
+
+	r.services[subdomain] = svc
+	log.Printf("registry: %s route %s -> %s:%d protocol=%s", svc.Source, subdomain, svc.IP, svc.Port, func() string {
+		if svc.Service != nil {
+			return svc.Service.Protocol
+		}
+		return ""
+	}())
+
+	r.notifyChange()
+}

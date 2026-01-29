@@ -280,7 +280,7 @@ func (d *Daemon) onDockerChanged(services []discovery.DiscoveredService) {
 
 	for _, svc := range services {
 		d.dockerWatcher.DiscoverServiceInfo(svc, func(updated discovery.DiscoveredService) {
-			d.routeRegistry.UpdateServices(discovery.RouteSourceDocker, []discovery.DiscoveredService{updated})
+			d.routeRegistry.UpdateService(updated)
 		})
 	}
 
@@ -296,7 +296,7 @@ func (d *Daemon) onDockerChanged(services []discovery.DiscoveredService) {
 func (d *Daemon) onDockerHealthy(svc discovery.DiscoveredService) {
 	log.Printf("docker: container healthy %s", svc.Subdomain)
 	d.dockerWatcher.DiscoverServiceInfo(svc, func(updated discovery.DiscoveredService) {
-		d.routeRegistry.UpdateServices(discovery.RouteSourceDocker, []discovery.DiscoveredService{updated})
+		d.routeRegistry.UpdateService(updated)
 	})
 }
 

@@ -2,6 +2,7 @@ package discovery
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"strconv"
 	"strings"
@@ -158,31 +159,62 @@ func (w *DockerWatcher) parseContainer(c container.Summary) *DiscoveredService {
 }
 
 func (w *DockerWatcher) watchEvents() {
-	eventsChan, errChan := w.client.Events(w.ctx, events.ListOptions{
-		Filters: filters.NewArgs(
-			filters.Arg("type", "container"),
-			filters.Arg("event", "start"),
-			filters.Arg("event", "stop"),
-			filters.Arg("event", "die"),
-		),
-	})
+	resyncTicker := time.NewTicker(30 * time.Second)
+	defer resyncTicker.Stop()
 
+	for {
+		eventsChan, errChan := w.client.Events(w.ctx, events.ListOptions{
+			Filters: filters.NewArgs(
+				filters.Arg("type", "container"),
+				filters.Arg("event", "start"),
+				filters.Arg("event", "stop"),
+				filters.Arg("event", "die"),
+			),
+		})
+
+		if err := w.handleEventStream(eventsChan, errChan, resyncTicker.C); err != nil {
+			select {
+			case <-w.ctx.Done():
+				return
+			default:
+				log.Printf("docker: event stream error, reconnecting: %v", err)
+				time.Sleep(5 * time.Second)
+				continue
+			}
+		}
+		return
+	}
+}
+
+func (w *DockerWatcher) handleEventStream(eventsChan <-chan events.Message, errChan <-chan error, resync <-chan time.Time) error {
 	for {
 		select {
 		case <-w.ctx.Done():
-			return
-		case event := <-eventsChan:
-			containers, err := w.listContainers()
-			if err == nil && w.onChange != nil {
-				w.onChange(containers)
+			return nil
+		case event, ok := <-eventsChan:
+			if !ok {
+				return fmt.Errorf("event channel closed")
 			}
-
+			w.resync()
 			if event.Action == "start" && w.onHealthy != nil {
 				go w.waitForHealthy(event.Actor.ID)
 			}
-		case <-errChan:
-			return
+		case err := <-errChan:
+			return fmt.Errorf("event stream: %w", err)
+		case <-resync:
+			w.resync()
 		}
+	}
+}
+
+func (w *DockerWatcher) resync() {
+	containers, err := w.listContainers()
+	if err != nil {
+		log.Printf("docker: failed to list containers: %v", err)
+		return
+	}
+	if w.onChange != nil {
+		w.onChange(containers)
 	}
 }
 
