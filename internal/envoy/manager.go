@@ -105,7 +105,7 @@ func (m *Manager) runLoop() {
 
 func (m *Manager) spawn() error {
 	m.mu.Lock()
-	cmd := exec.CommandContext(m.ctx, "envoy", "-c", m.configPath, "-l", m.logLevel)
+	cmd := exec.CommandContext(m.ctx, "envoy", "-c", m.configPath, "-l", m.logLevel, "--component-log-level", "main:warn")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	m.cmd = cmd
