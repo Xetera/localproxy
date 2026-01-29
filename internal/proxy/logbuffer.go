@@ -280,7 +280,7 @@ func (lm *LogManager) UpdateRoutes(routes []Route) {
 			key := "pid:" + strconv.Itoa(route.PID)
 			activeKeys[key] = true
 			if !lm.traceProcessLogs {
-				fmt.Println("Skipping process tracing because it wasn't turned on with `--process-logs`")
+				fmt.Println("Skipping process tracing because it wasn't turned on with `--trace-process-logs`")
 				continue
 			}
 			lm.StartTracing(key, route.PID)
