@@ -79,12 +79,6 @@ func NewDashboardServer(basePaths []string, traceProcessLogs bool) *DashboardSer
 	return s
 }
 
-func (s *DashboardServer) SetBasePaths(paths []string) {
-	s.routesMu.Lock()
-	defer s.routesMu.Unlock()
-	s.basePaths = paths
-}
-
 func (s *DashboardServer) handleRoot(w http.ResponseWriter, r *http.Request) {
 	host := r.Host
 	if fwdHost := r.Header.Get("X-Forwarded-Host"); fwdHost != "" {

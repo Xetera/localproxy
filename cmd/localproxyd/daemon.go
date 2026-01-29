@@ -149,7 +149,8 @@ func (d *Daemon) initEnvoy() error {
 }
 
 func (d *Daemon) initRouting() {
-	d.dashboardServer = proxy.NewDashboardServer(nil, d.config.TraceProcessLogs)
+	basePaths := d.getBasePaths()
+	d.dashboardServer = proxy.NewDashboardServer(basePaths, d.config.TraceProcessLogs)
 	d.routeRegistry = registry.NewRouteRegistry()
 
 	d.routeRegistry.SetOnChange(d.onRoutesChanged)
@@ -163,10 +164,6 @@ func (d *Daemon) initRouting() {
 			log.Printf("failed to set initial hosts: %v", err)
 		}
 	}
-
-	basePaths := d.getBasePaths()
-	homeDir, _ := os.UserHomeDir()
-	d.dashboardServer.SetBasePaths(append(basePaths, homeDir))
 }
 
 func (d *Daemon) initWatchers() error {
