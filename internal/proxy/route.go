@@ -13,6 +13,7 @@ type Route struct {
 	Source             discovery.RouteSource
 	DockerHasAutoName  bool
 	DockerContainerID  string
+	DockerPorts        []discovery.DockerPort
 	NeedsCustomMapping bool
 	IsDocker           bool
 	ServiceProtocol    string

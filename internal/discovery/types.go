@@ -31,10 +31,18 @@ type ProcessInfo struct {
 	IsDocker           bool
 }
 
+type DockerPort struct {
+	Port       int
+	PrivatePort int
+	IP         string
+	Type       string
+}
+
 type DockerInfo struct {
 	ID            string
 	Name          string
 	HasCustomName bool
+	Ports         []DockerPort
 }
 
 type FileInfo struct {

@@ -350,9 +350,14 @@
           >needs mapping</span
         >{{end}}
         <!--{{if .Disabled}}<span class="badge badge-warning">disabled</span>{{end}}-->
-        {{end}}
+        {{end}} {{if and .DockerPorts (gt (len .DockerPorts) 1)}}
+        <span
+          title="{{range $i, $p := .DockerPorts}}{{if $i}}, {{end}}:{{$p.Port}}{{end}}"
+          >:{{.Port}} (+{{len .DockerPorts | add -1}})</span
+        >
+        {{else}}
         <span>{{if .TCPPort}}tcp:{{.TCPPort}}{{else}}:{{.Port}}{{end}}</span>
-        {{if .DisplayPath}}
+        {{end}} {{if .DisplayPath}}
         <div class="service-path" title="{{.DisplayPath}}">
           {{.DisplayPath}}
         </div>
@@ -369,8 +374,8 @@
       <div class="service-list">
         {{if or .DockerRoutes .UnroutedContainers}}
         <div class="section-divider">Docker</div>
-        {{range .DockerRoutes}}{{template "service-item" .}}{{end}}
-        {{range .UnroutedContainers}}
+        {{range .DockerRoutes}}{{template "service-item" .}}{{end}} {{range
+        .UnroutedContainers}}
         <div class="service-item" style="opacity: 0.6">
           <div class="service-header">
             <div class="service-name">{{.Name}}</div>
@@ -382,9 +387,7 @@
             <span class="badge badge-warning">{{.Reason}}</span>
           </div>
         </div>
-        {{end}}
-        {{end}} {{if
-        or .ProcessGroups .UngroupedProcesses}}
+        {{end}} {{end}} {{if or .ProcessGroups .UngroupedProcesses}}
         <div class="section-divider">Local Processes</div>
         {{range .ProcessGroups}}
         <div class="subsection-divider">
@@ -491,7 +494,23 @@
         document.getElementById('detail-title').href = url;
         document.getElementById('info-pid').textContent = route.PID || '-';
         document.getElementById('info-user').textContent = '-';
-        document.getElementById('info-port').textContent = route.TCPPort ? `tcp:${route.TCPPort}` : `:${route.Port}`;
+        let portText = route.TCPPort ? `tcp:${route.TCPPort}` : `:${route.Port}`;
+        if (route.DockerPorts && route.DockerPorts.length > 0) {
+          const portsByNumber = {};
+          for (const p of route.DockerPorts) {
+            if (!portsByNumber[p.Port]) {
+              portsByNumber[p.Port] = new Set();
+            }
+            portsByNumber[p.Port].add(p.Type);
+          }
+          portText = Object.entries(portsByNumber).map(([port, types]) => {
+            if (types.has('tcp') && types.has('udp')) {
+              return `:${port}`;
+            }
+            return `:${port}/${[...types].join(',')}`;
+          }).join(', ');
+        }
+        document.getElementById('info-port').textContent = portText;
         document.getElementById('info-cwd').textContent = route.Cwd || '-';
         document.getElementById('metric-uptime').textContent = '-';
         document.getElementById('packets-value').textContent = '0';

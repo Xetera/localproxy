@@ -320,7 +320,10 @@ func (s *DashboardServer) serveDashboard(w http.ResponseWriter, r *http.Request)
 	}
 
 	templatesPath := getTemplatesPath()
-	tmpl, err := template.ParseFiles(filepath.Join(templatesPath, "dashboard.html"))
+	funcMap := template.FuncMap{
+		"add": func(a, b int) int { return a + b },
+	}
+	tmpl, err := template.New("dashboard.html").Funcs(funcMap).ParseFiles(filepath.Join(templatesPath, "dashboard.html"))
 	if err != nil {
 		http.Error(w, fmt.Sprintf("template error: %v", err), http.StatusInternalServerError)
 		return

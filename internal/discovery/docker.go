@@ -143,6 +143,22 @@ func (w *DockerWatcher) parseContainer(c container.Summary) (*DiscoveredService,
 		ip = "127.0.0.1"
 	}
 
+	var allPorts []DockerPort
+	for _, p := range c.Ports {
+		dp := DockerPort{
+			PrivatePort: int(p.PrivatePort),
+			Type:        p.Type,
+		}
+		if p.PublicPort > 0 {
+			dp.Port = int(p.PublicPort)
+			dp.IP = "127.0.0.1"
+		} else {
+			dp.Port = int(p.PrivatePort)
+			dp.IP = ip
+		}
+		allPorts = append(allPorts, dp)
+	}
+
 	if portStr, ok := c.Labels[LabelPort]; ok {
 		port, _ = strconv.Atoi(portStr)
 	}
@@ -179,6 +195,7 @@ func (w *DockerWatcher) parseContainer(c container.Summary) (*DiscoveredService,
 			ID:            c.ID,
 			Name:          name,
 			HasCustomName: hasCustomName,
+			Ports:         allPorts,
 		},
 	}, ""
 }

@@ -111,6 +111,7 @@ func (r *RouteRegistry) getRoutesLocked() []proxy.Route {
 		if svc.Docker != nil {
 			route.DockerContainerID = svc.Docker.ID
 			route.DockerHasAutoName = !svc.Docker.HasCustomName
+			route.DockerPorts = svc.Docker.Ports
 		}
 
 		if svc.Service != nil {
