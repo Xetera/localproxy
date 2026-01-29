@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"fmt"
 	"io"
 	"log"
 	"os/exec"
@@ -55,14 +56,15 @@ func (lb *LogBuffer) GetLines() []string {
 }
 
 type LogManager struct {
-	buffers      map[string]*LogBuffer
-	mu           sync.RWMutex
-	tracers      map[string]context.CancelFunc
-	tracerMu     sync.Mutex
-	dockerClient *client.Client
+	buffers          map[string]*LogBuffer
+	mu               sync.RWMutex
+	tracers          map[string]context.CancelFunc
+	tracerMu         sync.Mutex
+	dockerClient     *client.Client
+	traceProcessLogs bool
 }
 
-func NewLogManager() *LogManager {
+func NewLogManager(traceProcessLogs bool) *LogManager {
 	dockerClient, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		log.Printf("docker client init failed for logs: %v", err)
@@ -70,9 +72,10 @@ func NewLogManager() *LogManager {
 	}
 
 	return &LogManager{
-		buffers:      make(map[string]*LogBuffer),
-		tracers:      make(map[string]context.CancelFunc),
-		dockerClient: dockerClient,
+		buffers:          make(map[string]*LogBuffer),
+		tracers:          make(map[string]context.CancelFunc),
+		dockerClient:     dockerClient,
+		traceProcessLogs: traceProcessLogs,
 	}
 }
 
@@ -276,6 +279,10 @@ func (lm *LogManager) UpdateRoutes(routes []Route) {
 		} else if route.PID > 0 {
 			key := "pid:" + strconv.Itoa(route.PID)
 			activeKeys[key] = true
+			if !lm.traceProcessLogs {
+				fmt.Println("Skipping process tracing because it wasn't turned on with `--process-logs`")
+				continue
+			}
 			lm.StartTracing(key, route.PID)
 		}
 	}

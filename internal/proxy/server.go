@@ -10,10 +10,8 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -423,6 +421,7 @@ func (s *DashboardServer) serveLogs(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// TODO: use the existing log manager functionality for this.
 func (s *DashboardServer) streamLogs(w http.ResponseWriter, r *http.Request, subdomain string) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -465,26 +464,6 @@ func (s *DashboardServer) streamLogs(w http.ResponseWriter, r *http.Request, sub
 			http.Error(w, fmt.Sprintf("failed to get docker logs: %v", err), http.StatusInternalServerError)
 			return
 		}
-	} else if route.PID > 0 {
-		pidStr := strconv.Itoa(route.PID)
-		dtrace := exec.CommandContext(r.Context(), "sudo", "dtrace", "-p", pidStr, "-qn",
-			`syscall::write*:entry
-			/pid == $target && arg0 == 1/ {
-				printf("%s", copyinstr(arg1, arg2));
-			}`)
-
-		reader, err = dtrace.StdoutPipe()
-		if err != nil {
-			http.Error(w, fmt.Sprintf("failed to create pipe: %v", err), http.StatusInternalServerError)
-			return
-		}
-
-		if err := dtrace.Start(); err != nil {
-			http.Error(w, fmt.Sprintf("failed to start dtrace: %v", err), http.StatusInternalServerError)
-			return
-		}
-
-		defer dtrace.Process.Kill()
 	} else {
 		http.Error(w, "no logs available for this service", http.StatusBadRequest)
 		return

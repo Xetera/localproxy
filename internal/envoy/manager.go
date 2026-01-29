@@ -55,11 +55,6 @@ func (m *Manager) Start() error {
 func (m *Manager) Stop() {
 	m.mu.Lock()
 	m.shuttingDown = true
-	m.mu.Unlock()
-
-	m.cancel()
-
-	m.mu.Lock()
 	if m.cmd != nil && m.cmd.Process != nil {
 		m.cmd.Process.Signal(os.Interrupt)
 		done := make(chan struct{})
@@ -75,6 +70,8 @@ func (m *Manager) Stop() {
 		}
 	}
 	m.mu.Unlock()
+
+	m.cancel()
 }
 
 func (m *Manager) runLoop() {
