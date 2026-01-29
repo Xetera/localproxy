@@ -122,6 +122,7 @@ func (b *SnapshotBuilder) Build(routes []Route, certPath, keyPath string, httpsR
 	routerFilter, _ := anypb.New(&router.Router{})
 
 	tcpListenerChains := make(map[int][]*listener.FilterChain)
+	tcpListenerNeedsTLS := make(map[int]bool)
 	usedPorts := make(map[int]bool)
 
 	for _, r := range routes {
@@ -173,9 +174,6 @@ func (b *SnapshotBuilder) Build(routes []Route, certPath, keyPath string, httpsR
 		})
 
 		if r.Protocol == ProtocolTCP && r.TCPPort > 0 {
-			if usedPorts[r.TCPPort] {
-				continue
-			}
 			if isPortInUse(r.TCPPort) {
 				continue
 			}
@@ -186,6 +184,10 @@ func (b *SnapshotBuilder) Build(routes []Route, certPath, keyPath string, httpsR
 				},
 			}
 			tcpProxyAny, _ := anypb.New(tcpProxyConfig)
+
+			if usedPorts[r.TCPPort] {
+				tcpListenerNeedsTLS[r.TCPPort] = true
+			}
 
 			tcpListenerChains[r.TCPPort] = append(tcpListenerChains[r.TCPPort], &listener.FilterChain{
 				FilterChainMatch: &listener.FilterChainMatch{
@@ -440,7 +442,7 @@ func (b *SnapshotBuilder) Build(routes []Route, certPath, keyPath string, httpsR
 	}
 
 	for port, chains := range tcpListenerChains {
-		listeners = append(listeners, &listener.Listener{
+		tcpListener := &listener.Listener{
 			Name: fmt.Sprintf("tcp_listener_%d", port),
 			Address: &core.Address{
 				Address: &core.Address_SocketAddress{
@@ -457,8 +459,18 @@ func (b *SnapshotBuilder) Build(routes []Route, certPath, keyPath string, httpsR
 				Name:       "envoy.filters.listener.tls_inspector",
 				ConfigType: &listener.ListenerFilter_TypedConfig{TypedConfig: tlsInspectorAny},
 			}},
-			FilterChains: chains,
-		})
+		}
+
+		if tcpListenerNeedsTLS[port] {
+			tcpListener.FilterChains = chains
+		} else {
+			rawChain := &listener.FilterChain{
+				Filters: chains[0].Filters,
+			}
+			tcpListener.FilterChains = append([]*listener.FilterChain{rawChain}, chains...)
+		}
+
+		listeners = append(listeners, tcpListener)
 	}
 
 	snap, err := cache.NewSnapshot(
