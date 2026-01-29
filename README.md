@@ -18,6 +18,15 @@ This project is currently WIP, so you'll have to install both `mkcer` and `envoy
 sudo CGO_ENABLED=0 go run ./cmd/localproxyd --watch ~/myprojects
 ```
 
+Then navigate to the dashboard https://proxy.localhost
+
+#### Flags
+
+- `--watch` Adds a folder to watch for processes. Only works with docker if not specified.
+- `--https-redirect` Force https redirects for all created endpoints
+- `--log-level` Log level for the envoy server. `error`, `info`, `debug`
+- `--trace-process-logs` Show logs from external processes on the dashboard using dtrace on macOS. Requires disabling SIP. This WILL eventually lock up your system badly enough for you to hold down the power button for a restart [unless you're on Tahoe](https://news.ycombinator.com/item?id=45974681)
+
 ### Local process example
 
 ```sh
