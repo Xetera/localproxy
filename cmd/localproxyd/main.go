@@ -214,27 +214,7 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 
-	sig := <-sigCh
-	log.Printf("received signal: %v", sig)
-
-	log.Println("shutting down...")
-
-	if dockerWatcher != nil {
-		dockerWatcher.Stop()
-	}
-	if processWatcher != nil {
-		processWatcher.Stop()
-	}
-	envoyMgr.Stop()
-	dashboardServer.Stop()
-	xdsServer.Stop()
-
-	if hostsMgr != nil {
-		if err := hostsMgr.Cleanup(); err != nil {
-			log.Printf("failed to cleanup hosts: %v", err)
-		}
-	}
-
+	<-sigCh
 	log.Println("daemon stopped")
 }
 
