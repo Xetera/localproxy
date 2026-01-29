@@ -197,7 +197,7 @@ func (w *ProcessWatcher) processEntry(state *scanState, entry portEntry) {
 
 	basePath := w.findMatchingBasePath(cwd)
 	if basePath == "" {
-		w.handleOutsideBasePath(state, cwd, pid, port, ip)
+		w.handleOutsideBasePath(state, pid, port, ip)
 		return
 	}
 
@@ -271,7 +271,7 @@ func (w *ProcessWatcher) handleUnknownCWD(state *scanState, pid int, port int, i
 	w.addWellKnownProcess(state, pid, port, ip)
 }
 
-func (w *ProcessWatcher) handleOutsideBasePath(state *scanState, cwd string, pid int, port int, ip string) {
+func (w *ProcessWatcher) handleOutsideBasePath(state *scanState, pid int, port int, ip string) {
 	w.addWellKnownProcess(state, pid, port, ip)
 }
 
@@ -307,14 +307,6 @@ func (w *ProcessWatcher) filterPathParts(parts []string, ignoredDirs map[string]
 		}
 	}
 	return filtered
-}
-
-func (w *ProcessWatcher) reverseAndJoin(parts []string) string {
-	reversed := make([]string, len(parts))
-	for i := range parts {
-		reversed[i] = parts[len(parts)-1-i]
-	}
-	return strings.Join(reversed, ".")
 }
 
 func (w *ProcessWatcher) discoverNewServices(targets []ScanTarget) {

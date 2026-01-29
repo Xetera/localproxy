@@ -15,9 +15,10 @@ type RouteRegistry struct {
 	onChange func([]proxy.Route)
 }
 
-func NewRouteRegistry() *RouteRegistry {
+func NewRouteRegistry(onChange func([]proxy.Route)) *RouteRegistry {
 	return &RouteRegistry{
 		services: make(map[string]discovery.DiscoveredService),
+		onChange: onChange,
 	}
 }
 

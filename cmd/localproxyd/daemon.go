@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -73,7 +74,7 @@ func NewDaemon(cfg Config) (*Daemon, error) {
 
 func (d *Daemon) Start() error {
 	if err := d.initHosts(); err != nil {
-		log.Printf("warning: hosts manager disabled: %v", err)
+		return fmt.Errorf("warning: hosts manager disabled: %v", err)
 	}
 
 	if err := d.initCerts(); err != nil {
@@ -88,7 +89,9 @@ func (d *Daemon) Start() error {
 		return err
 	}
 
-	d.initRouting()
+	if err := d.initRouting(); err != nil {
+		return err
+	}
 
 	if err := d.initWatchers(); err != nil {
 		return err
@@ -97,6 +100,7 @@ func (d *Daemon) Start() error {
 	if err := d.dashboardServer.Start(); err != nil {
 		return err
 	}
+
 	log.Printf("dashboard server listening on 127.0.0.1:%d", proxy.ServerPort)
 	log.Printf("envoy proxy listening on :80 and :443")
 
@@ -106,6 +110,10 @@ func (d *Daemon) Start() error {
 func (d *Daemon) Stop() {
 	if d.logFile != nil {
 		d.logFile.Close()
+	}
+	err := d.hostsMgr.Cleanup()
+	if err != nil {
+		log.Printf("warning: hosts manager cleanup failed: %v", err)
 	}
 	log.Println("daemon stopped")
 }
@@ -148,22 +156,21 @@ func (d *Daemon) initEnvoy() error {
 	return d.envoyMgr.Start()
 }
 
-func (d *Daemon) initRouting() {
+func (d *Daemon) initRouting() error {
 	basePaths := d.getBasePaths()
 	d.dashboardServer = proxy.NewDashboardServer(basePaths, d.config.TraceProcessLogs)
-	d.routeRegistry = registry.NewRouteRegistry()
-
-	d.routeRegistry.SetOnChange(d.onRoutesChanged)
+	d.routeRegistry = registry.NewRouteRegistry(d.onRoutesChanged)
 
 	if err := d.xdsServer.UpdateSnapshot([]xds.Route{}, d.certPath, d.keyPath); err != nil {
-		log.Printf("failed to set initial xds snapshot: %v", err)
+		return fmt.Errorf("failed to set initial xds snapshot: %v", err)
 	}
 
 	if d.hostsMgr != nil {
 		if err := d.hostsMgr.Update([]string{"proxy"}); err != nil {
-			log.Printf("failed to set initial hosts: %v", err)
+			return fmt.Errorf("failed to set initial hosts: %v", err)
 		}
 	}
+	return nil
 }
 
 func (d *Daemon) initWatchers() error {

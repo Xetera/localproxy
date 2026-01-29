@@ -3,7 +3,6 @@ package hosts
 import (
 	"fmt"
 	"log"
-	"strings"
 	"sync"
 
 	"github.com/txn2/txeh"
@@ -75,8 +74,4 @@ func (m *Manager) Cleanup() error {
 
 	log.Printf("hosts: cleaned up managed entries")
 	return nil
-}
-
-func isLocalhost(hostname string) bool {
-	return strings.HasSuffix(hostname, ".localhost") || strings.HasSuffix(hostname, ".internal")
 }
