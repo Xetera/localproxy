@@ -20,12 +20,19 @@ const (
 	LabelTCPPort = "localproxy.tcpport"
 )
 
+type UnroutedContainer struct {
+	ID     string
+	Name   string
+	Reason string
+}
+
 type DockerWatcher struct {
-	client    *client.Client
-	onChange  func([]DiscoveredService)
-	onHealthy func(DiscoveredService)
-	ctx       context.Context
-	cancel    context.CancelFunc
+	client            *client.Client
+	onChange          func([]DiscoveredService)
+	onHealthy         func(DiscoveredService)
+	onUnroutedChanged func([]UnroutedContainer)
+	ctx               context.Context
+	cancel            context.CancelFunc
 }
 
 func NewDockerWatcher() (*DockerWatcher, error) {
@@ -51,13 +58,20 @@ func (w *DockerWatcher) SetOnHealthy(fn func(DiscoveredService)) {
 	w.onHealthy = fn
 }
 
+func (w *DockerWatcher) SetOnUnroutedChanged(fn func([]UnroutedContainer)) {
+	w.onUnroutedChanged = fn
+}
+
 func (w *DockerWatcher) Start() error {
-	containers, err := w.listContainers()
+	containers, unrouted, err := w.listContainers()
 	if err != nil {
 		return err
 	}
 	if w.onChange != nil {
 		w.onChange(containers)
+	}
+	if w.onUnroutedChanged != nil {
+		w.onUnroutedChanged(unrouted)
 	}
 
 	go w.watchEvents()
@@ -69,25 +83,36 @@ func (w *DockerWatcher) Stop() {
 	w.client.Close()
 }
 
-func (w *DockerWatcher) listContainers() ([]DiscoveredService, error) {
+func (w *DockerWatcher) listContainers() ([]DiscoveredService, []UnroutedContainer, error) {
 	containers, err := w.client.ContainerList(w.ctx, container.ListOptions{})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	var result []DiscoveredService
+	var unrouted []UnroutedContainer
 	for _, c := range containers {
-		dc := w.parseContainer(c)
+		dc, reason := w.parseContainer(c)
 		if dc != nil {
 			result = append(result, *dc)
+		} else if reason != "" {
+			name := ""
+			if len(c.Names) > 0 {
+				name = strings.TrimPrefix(c.Names[0], "/")
+			}
+			unrouted = append(unrouted, UnroutedContainer{
+				ID:     c.ID,
+				Name:   name,
+				Reason: reason,
+			})
 		}
 	}
-	return result, nil
+	return result, unrouted, nil
 }
 
-func (w *DockerWatcher) parseContainer(c container.Summary) *DiscoveredService {
+func (w *DockerWatcher) parseContainer(c container.Summary) (*DiscoveredService, string) {
 	if len(c.Names) == 0 {
-		return nil
+		return nil, ""
 	}
 
 	name := strings.TrimPrefix(c.Names[0], "/")
@@ -141,7 +166,7 @@ func (w *DockerWatcher) parseContainer(c container.Summary) *DiscoveredService {
 	}
 
 	if port == 0 && tcpPort == 0 {
-		return nil
+		return nil, "no exposed ports"
 	}
 
 	return &DiscoveredService{
@@ -155,7 +180,7 @@ func (w *DockerWatcher) parseContainer(c container.Summary) *DiscoveredService {
 			Name:          name,
 			HasCustomName: hasCustomName,
 		},
-	}
+	}, ""
 }
 
 func (w *DockerWatcher) watchEvents() {
@@ -208,13 +233,16 @@ func (w *DockerWatcher) handleEventStream(eventsChan <-chan events.Message, errC
 }
 
 func (w *DockerWatcher) resync() {
-	containers, err := w.listContainers()
+	containers, unrouted, err := w.listContainers()
 	if err != nil {
 		log.Printf("docker: failed to list containers: %v", err)
 		return
 	}
 	if w.onChange != nil {
 		w.onChange(containers)
+	}
+	if w.onUnroutedChanged != nil {
+		w.onUnroutedChanged(unrouted)
 	}
 }
 
@@ -226,7 +254,7 @@ func (w *DockerWatcher) waitForHealthy(containerID string) {
 	}
 
 	if inspect.State.Health == nil {
-		containers, err := w.listContainers()
+		containers, _, err := w.listContainers()
 		if err != nil {
 			return
 		}
@@ -263,7 +291,7 @@ func (w *DockerWatcher) waitForHealthy(containerID string) {
 			}
 
 			if inspect.State.Health.Status == "healthy" {
-				containers, err := w.listContainers()
+				containers, _, err := w.listContainers()
 				if err != nil {
 					return
 				}

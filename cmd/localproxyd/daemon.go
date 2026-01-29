@@ -197,6 +197,7 @@ func (d *Daemon) initWatchers() error {
 		d.dockerWatcher = dockerWatcher
 		d.dockerWatcher.SetOnChange(d.onDockerChanged)
 		d.dockerWatcher.SetOnHealthy(d.onDockerHealthy)
+		d.dockerWatcher.SetOnUnroutedChanged(d.onUnroutedContainersChanged)
 		if err := d.dockerWatcher.Start(); err != nil {
 			log.Printf("warning: failed to start docker watcher: %v", err)
 		}
@@ -298,6 +299,19 @@ func (d *Daemon) onDockerHealthy(svc discovery.DiscoveredService) {
 	d.dockerWatcher.DiscoverServiceInfo(svc, func(updated discovery.DiscoveredService) {
 		d.routeRegistry.UpdateService(updated)
 	})
+}
+
+func (d *Daemon) onUnroutedContainersChanged(containers []discovery.UnroutedContainer) {
+	log.Printf("unrouted docker containers: %d", len(containers))
+	unrouted := make([]proxy.UnroutedContainer, len(containers))
+	for i, c := range containers {
+		unrouted[i] = proxy.UnroutedContainer{
+			ID:     c.ID,
+			Name:   c.Name,
+			Reason: c.Reason,
+		}
+	}
+	d.dashboardServer.UpdateUnroutedContainers(unrouted)
 }
 
 func filterBySource(services []discovery.DiscoveredService, source discovery.RouteSource) []discovery.DiscoveredService {

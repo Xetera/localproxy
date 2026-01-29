@@ -49,12 +49,19 @@ func getTemplatesPath() string {
 	return "internal/proxy/templates"
 }
 
+type UnroutedContainer struct {
+	ID     string
+	Name   string
+	Reason string
+}
+
 type DashboardServer struct {
-	server     *http.Server
-	routes     map[string]Route
-	routesMu   sync.RWMutex
-	logManager *LogManager
-	basePaths  []string
+	server             *http.Server
+	routes             map[string]Route
+	routesMu           sync.RWMutex
+	logManager         *LogManager
+	basePaths          []string
+	unroutedContainers []UnroutedContainer
 }
 
 func NewDashboardServer(basePaths []string, traceProcessLogs bool) *DashboardServer {
@@ -133,6 +140,12 @@ func (s *DashboardServer) UpdateRoutes(routes []Route) {
 	go s.logManager.UpdateRoutes(routes)
 }
 
+func (s *DashboardServer) UpdateUnroutedContainers(containers []UnroutedContainer) {
+	s.routesMu.Lock()
+	defer s.routesMu.Unlock()
+	s.unroutedContainers = containers
+}
+
 func (s *DashboardServer) Start() error {
 	go func() {
 		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -179,6 +192,7 @@ func (s *DashboardServer) serveDashboard(w http.ResponseWriter, r *http.Request)
 
 	s.routesMu.RLock()
 	basePaths := s.basePaths
+	unroutedContainers := s.unroutedContainers
 	var enabledRoutes, disabledRoutes, wellKnownRoutes []RouteWithLogs
 	for _, route := range s.routes {
 		routeWithLogs := RouteWithLogs{
@@ -343,15 +357,16 @@ func (s *DashboardServer) serveDashboard(w http.ResponseWriter, r *http.Request)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	tmpl.Execute(w, map[string]interface{}{
-		"EnabledRoutes":      enabledRoutes,
-		"DockerRoutes":       dockerRoutes,
-		"ProcessGroups":      processGroups,
-		"UngroupedProcesses": ungroupedProcesses,
-		"DisabledRoutes":     otherDisabledRoutes,
-		"WellKnownRoutes":    wellKnownRoutes,
-		"InactiveWellKnown":  inactiveWellKnown,
-		"LogsMapJSON":        template.JS(logsJSON),
-		"RoutesJSON":         template.JS(routesJSON),
+		"EnabledRoutes":       enabledRoutes,
+		"DockerRoutes":        dockerRoutes,
+		"ProcessGroups":       processGroups,
+		"UngroupedProcesses":  ungroupedProcesses,
+		"DisabledRoutes":      otherDisabledRoutes,
+		"WellKnownRoutes":     wellKnownRoutes,
+		"InactiveWellKnown":   inactiveWellKnown,
+		"UnroutedContainers":  unroutedContainers,
+		"LogsMapJSON":         template.JS(logsJSON),
+		"RoutesJSON":          template.JS(routesJSON),
 	})
 }
 

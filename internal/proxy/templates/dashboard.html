@@ -367,9 +367,23 @@
     </div>
     <div class="grid-container">
       <div class="service-list">
-        {{if .DockerRoutes}}
+        {{if or .DockerRoutes .UnroutedContainers}}
         <div class="section-divider">Docker</div>
-        {{range .DockerRoutes}}{{template "service-item" .}}{{end}} {{end}} {{if
+        {{range .DockerRoutes}}{{template "service-item" .}}{{end}}
+        {{range .UnroutedContainers}}
+        <div class="service-item" style="opacity: 0.6">
+          <div class="service-header">
+            <div class="service-name">{{.Name}}</div>
+          </div>
+          <div class="service-meta">
+            <div class="service-source">
+              {{template "docker-icon"}}<span>Docker</span>
+            </div>
+            <span class="badge badge-warning">{{.Reason}}</span>
+          </div>
+        </div>
+        {{end}}
+        {{end}} {{if
         or .ProcessGroups .UngroupedProcesses}}
         <div class="section-divider">Local Processes</div>
         {{range .ProcessGroups}}
