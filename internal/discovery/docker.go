@@ -354,7 +354,32 @@ func (w *DockerWatcher) DiscoverServiceInfo(svc DiscoveredService, onDiscovered 
 			svc.Service = &services[0]
 		}
 
+		log.Printf("docker: before port selection for %s: port=%d, service=%v", svc.Subdomain, svc.Port, svc.Service)
+		derivedPort := w.derivePorts(&svc, services)
+		if derivedPort == 0 {
+			log.Printf("docker: no port derived for %s, continuing to use %d", svc.Subdomain, svc.Port)
+		} else {
+			log.Printf("docker: after port selection for %s: port=%d, service=%v", svc.Subdomain, svc.Port, svc.Service)
+		}
 		log.Printf("docker: discovered %d services for %s", len(services), svc.Subdomain)
 		onDiscovered(svc)
 	}()
+}
+
+func (*DockerWatcher) derivePorts(svc *DiscoveredService, services []ServiceInfo) int {
+	port := 0
+
+	if len(svc.Docker.Ports) > 1 {
+		for _, s := range services {
+			if s.Protocol == "http" || s.Protocol == "https" {
+				oldPort := svc.Port
+				svc.Port = s.Port
+				svc.Service = &s
+				log.Printf("docker: using HTTP port %d instead of %d for %s", s.Port, oldPort, svc.Subdomain)
+				port = svc.Port
+				break
+			}
+		}
+	}
+	return port
 }
