@@ -6,7 +6,6 @@ const (
 	RouteSourceProcess   RouteSource = "process"
 	RouteSourceDocker    RouteSource = "docker"
 	RouteSourceWellKnown RouteSource = "wellknown"
-	RouteSourceFile      RouteSource = "file"
 )
 
 type DiscoveredService struct {
@@ -18,7 +17,7 @@ type DiscoveredService struct {
 
 	Process *ProcessInfo
 	Docker  *DockerInfo
-	File    *FileInfo
+	Folder  *FolderInfo
 	Service *ServiceInfo
 }
 
@@ -46,7 +45,7 @@ type DockerInfo struct {
 	Ports         []DockerPort
 }
 
-type FileInfo struct {
+type FolderInfo struct {
 	Path string
 	Name string
 }

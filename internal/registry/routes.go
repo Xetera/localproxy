@@ -62,8 +62,6 @@ func (r *RouteRegistry) UpdateServices(source discovery.RouteSource, services []
 
 func (r *RouteRegistry) priority(source discovery.RouteSource) int {
 	switch source {
-	case discovery.RouteSourceFile:
-		return 4
 	case discovery.RouteSourceProcess:
 		return 3
 	case discovery.RouteSourceDocker:
