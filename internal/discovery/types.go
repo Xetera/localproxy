@@ -32,10 +32,11 @@ type ProcessInfo struct {
 }
 
 type DockerPort struct {
-	Port       int
-	PrivatePort int
-	IP         string
-	Type       string
+	Port            int
+	PrivatePort     int
+	IP              string
+	Type            string
+	ServiceProtocol string
 }
 
 type DockerInfo struct {

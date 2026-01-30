@@ -319,6 +319,65 @@ func (s *DashboardServer) serveDashboard(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	selectedSubdomain := r.URL.Query().Get("service")
+
+	var selectedRoute *RouteWithLogs
+	var selectedLogs []string
+
+	allRoutes := append(append(append([]RouteWithLogs{}, dockerRoutes...), ungroupedProcesses...), wellKnownRoutes...)
+	for _, g := range processGroups {
+		allRoutes = append(allRoutes, g.Routes...)
+	}
+
+	type PortRepr struct {
+		Port     int
+		Text     string
+		Protocol string
+	}
+
+	var portRepr []PortRepr
+	for i := range allRoutes {
+		if allRoutes[i].Subdomain == selectedSubdomain {
+			selectedRoute = &allRoutes[i]
+			selectedLogs = allRoutes[i].RecentLogs
+			if len(selectedRoute.DockerPorts) > 0 {
+				type portInfo struct {
+					udp             bool
+					tcp             bool
+					serviceProtocol string
+				}
+				portsByNumber := make(map[int]*portInfo)
+				for _, p := range selectedRoute.DockerPorts {
+					if portsByNumber[p.Port] == nil {
+						portsByNumber[p.Port] = &portInfo{}
+					}
+					info := portsByNumber[p.Port]
+					if p.Type == "udp" {
+						info.udp = true
+					}
+					if p.Type == "tcp" {
+						info.tcp = true
+						if p.ServiceProtocol != "" {
+							info.serviceProtocol = p.ServiceProtocol
+						}
+					}
+				}
+				for port, info := range portsByNumber {
+					var text string
+					if info.tcp && info.udp {
+						text = fmt.Sprintf("%d", port)
+					} else if info.tcp {
+						text = fmt.Sprintf("%d/tcp", port)
+					} else {
+						text = fmt.Sprintf("%d/udp", port)
+					}
+					portRepr = append(portRepr, PortRepr{Port: port, Text: text, Protocol: info.serviceProtocol})
+				}
+			}
+			break
+		}
+	}
+
 	templatesPath := getTemplatesPath()
 	funcMap := template.FuncMap{
 		"add": func(a, b int) int { return a + b },
@@ -329,47 +388,20 @@ func (s *DashboardServer) serveDashboard(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	logsMap := make(map[string][]string)
-	for _, r := range enabledRoutes {
-		logsMap[r.Subdomain] = r.RecentLogs
-	}
-	for _, r := range processRoutes {
-		if _, exists := logsMap[r.Subdomain]; !exists {
-			logsMap[r.Subdomain] = r.RecentLogs
-		}
-	}
-	for _, r := range wellKnownRoutes {
-		logsMap[r.Subdomain] = r.RecentLogs
-	}
-
-	logsJSON, _ := json.Marshal(logsMap)
-
-	routesMap := make(map[string]Route)
-	for _, r := range enabledRoutes {
-		routesMap[r.Subdomain] = r.Route
-	}
-	for _, r := range processRoutes {
-		if _, exists := routesMap[r.Subdomain]; !exists {
-			routesMap[r.Subdomain] = r.Route
-		}
-	}
-	for _, r := range wellKnownRoutes {
-		routesMap[r.Subdomain] = r.Route
-	}
-	routesJSON, _ := json.Marshal(routesMap)
-
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	tmpl.Execute(w, map[string]interface{}{
-		"EnabledRoutes":       enabledRoutes,
-		"DockerRoutes":        dockerRoutes,
-		"ProcessGroups":       processGroups,
-		"UngroupedProcesses":  ungroupedProcesses,
-		"DisabledRoutes":      otherDisabledRoutes,
-		"WellKnownRoutes":     wellKnownRoutes,
-		"InactiveWellKnown":   inactiveWellKnown,
-		"UnroutedContainers":  unroutedContainers,
-		"LogsMapJSON":         template.JS(logsJSON),
-		"RoutesJSON":          template.JS(routesJSON),
+		"EnabledRoutes":      enabledRoutes,
+		"DockerRoutes":       dockerRoutes,
+		"ProcessGroups":      processGroups,
+		"UngroupedProcesses": ungroupedProcesses,
+		"DisabledRoutes":     otherDisabledRoutes,
+		"WellKnownRoutes":    wellKnownRoutes,
+		"InactiveWellKnown":  inactiveWellKnown,
+		"UnroutedContainers": unroutedContainers,
+		"SelectedSubdomain":  selectedSubdomain,
+		"SelectedRoute":      selectedRoute,
+		"SelectedLogs":       selectedLogs,
+		"SelectedPorts":      portRepr,
 	})
 }
 

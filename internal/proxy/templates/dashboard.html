@@ -18,6 +18,10 @@
         height: 100vh;
         overflow: hidden;
       }
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
       .header {
         padding: 1.5rem 2rem;
         border-bottom: 1px solid #262626;
@@ -36,9 +40,9 @@
         overflow-y: auto;
       }
       .service-item {
+        display: block;
         padding: 1rem 1.2rem;
         border-bottom: 1px solid #1a1a1a;
-        cursor: pointer;
         transition: background 0.15s;
         border-left: 3px solid transparent;
       }
@@ -224,6 +228,49 @@
         text-align: center;
         padding: 2rem;
       }
+      .logs-with-ports {
+        flex: 1;
+        display: flex;
+        gap: 1rem;
+        min-height: 0;
+      }
+      .port-list {
+        display: grid;
+        grid-template-columns: auto auto auto;
+        gap: 0.25rem 0;
+        align-content: start;
+        font-family: ui-monospace, monospace;
+        font-size: 0.8rem;
+      }
+      .port-item {
+        display: contents;
+        color: #737373;
+      }
+      .port-item.active {
+        color: #60a5fa;
+      }
+      .port-item.active > * {
+        background: #1e3a5f;
+      }
+      .port-item > * {
+        padding: 0.25rem 0.5rem;
+      }
+      .port-item > *:first-child {
+        border-radius: 0.25rem 0 0 0.25rem;
+      }
+      .port-item > *:last-child {
+        border-radius: 0 0.25rem 0.25rem 0;
+      }
+      .port-arrow {
+        color: #60a5fa;
+        text-align: right;
+      }
+      .port-protocol {
+        color: #525252;
+      }
+      .port-item.active .port-protocol {
+        color: #93c5fd;
+      }
       .section-divider {
         padding: 0.75rem 1.2rem;
         background: #171717;
@@ -251,7 +298,6 @@
       .grouped-item-wrapper {
         display: flex;
         background: #0f0f0f;
-        cursor: pointer;
       }
       .grouped-item-wrapper::before {
         content: "";
@@ -318,53 +364,6 @@
         d="M13.983 11.078h2.119a.186.186 0 00.186-.185V9.006a.186.186 0 00-.186-.186h-2.119a.185.185 0 00-.185.185v1.888c0 .102.083.185.185.185m-2.954-5.43h2.118a.186.186 0 00.186-.186V3.574a.186.186 0 00-.186-.185h-2.118a.185.185 0 00-.185.185v1.888c0 .102.082.185.185.185m0 2.716h2.118a.187.187 0 00.186-.186V6.29a.186.186 0 00-.186-.185h-2.118a.185.185 0 00-.185.185v1.887c0 .102.082.185.185.186m-2.93 0h2.12a.186.186 0 00.184-.186V6.29a.185.185 0 00-.185-.185H8.1a.185.185 0 00-.185.185v1.887c0 .102.083.185.185.186m-2.964 0h2.119a.186.186 0 00.185-.186V6.29a.185.185 0 00-.185-.185H5.136a.186.186 0 00-.186.185v1.887c0 .102.084.185.186.186m5.893 2.715h2.118a.186.186 0 00.186-.185V9.006a.186.186 0 00-.186-.186h-2.118a.185.185 0 00-.185.185v1.888c0 .102.082.185.185.185m-2.93 0h2.12a.185.185 0 00.184-.185V9.006a.185.185 0 00-.184-.186h-2.12a.185.185 0 00-.184.185v1.888c0 .102.083.185.185.185m-2.964 0h2.119a.185.185 0 00.185-.185V9.006a.185.185 0 00-.184-.186h-2.12a.186.186 0 00-.186.186v1.887c0 .102.084.185.186.185m-2.92 0h2.12a.185.185 0 00.184-.185V9.006a.185.185 0 00-.184-.186h-2.12a.185.185 0 00-.184.185v1.888c0 .102.082.185.185.185M23.763 9.89c-.065-.051-.672-.51-1.954-.51-.338.001-.676.03-1.01.087-.248-1.7-1.653-2.53-1.716-2.566l-.344-.199-.226.327c-.284.438-.49.922-.612 1.43-.23.97-.09 1.882.403 2.661-.595.332-1.55.413-1.744.42H.751a.751.751 0 00-.75.748 11.376 11.376 0 00.692 4.062c.545 1.428 1.355 2.48 2.41 3.124 1.18.723 3.1 1.137 5.275 1.137.983.003 1.963-.086 2.93-.266a12.248 12.248 0 003.823-1.389c.98-.567 1.86-1.288 2.61-2.136 1.252-1.418 1.998-2.997 2.553-4.4h.221c1.372 0 2.215-.549 2.68-1.009.309-.293.55-.65.707-1.046l.098-.288Z"
       ></path>
     </svg>
-    {{end}} {{define "service-item"}}
-    <div
-      class="service-item"
-      data-subdomain="{{.Subdomain}}"
-      onclick="selectService('{{.Subdomain}}')"
-    >
-      <div class="service-header">
-        <div class="service-name">
-          {{if
-          .Subdomain}}{{.Subdomain}}.proxy.localhost{{else}}proxy.localhost{{end}}
-        </div>
-        <div class="log-count" id="count-{{.Subdomain}}">0 lines</div>
-      </div>
-      <div class="service-meta">
-        {{if eq .Source "docker"}}
-        <div class="service-source">
-          {{template "docker-icon"}}<span>Docker</span>
-        </div>
-        {{if .DockerHasAutoName}}<span class="badge badge-warning"
-          >auto-name</span
-        >{{end}} {{else if eq .Source "wellknown"}} {{if .IsDocker}}
-        <div class="service-source">
-          {{template "docker-icon"}}<span>Docker</span>
-        </div>
-        {{end}}
-        <span class="badge badge-wellknown"
-          >{{if .Subdomain}}auto{{else}}self{{end}}</span
-        >
-        {{else}} {{if .NeedsCustomMapping}}<span class="badge badge-warning"
-          >needs mapping</span
-        >{{end}}
-        <!--{{if .Disabled}}<span class="badge badge-warning">disabled</span>{{end}}-->
-        {{end}} {{if and .DockerPorts (gt (len .DockerPorts) 1)}}
-        <span
-          title="{{range $i, $p := .DockerPorts}}{{if $i}}, {{end}}:{{$p.Port}}{{end}}"
-          >:{{.Port}} (+{{len .DockerPorts | add -1}})</span
-        >
-        {{else}}
-        <span>{{if .TCPPort}}tcp:{{.TCPPort}}{{else}}:{{.Port}}{{end}}</span>
-        {{end}} {{if .DisplayPath}}
-        <div class="service-path" title="{{.DisplayPath}}">
-          {{.DisplayPath}}
-        </div>
-        {{end}}
-        <span style="margin-left: auto">{{or .ServiceProtocol "?"}}</span>
-      </div>
-    </div>
     {{end}}
 
     <div class="header">
@@ -374,8 +373,40 @@
       <div class="service-list">
         {{if or .DockerRoutes .UnroutedContainers}}
         <div class="section-divider">Docker</div>
-        {{range .DockerRoutes}}{{template "service-item" .}}{{end}} {{range
-        .UnroutedContainers}}
+        {{range .DockerRoutes}}
+        <a
+          class="service-item{{if eq $.SelectedSubdomain .Subdomain}} active{{end}}"
+          href="/?service={{.Subdomain}}"
+        >
+          <div class="service-header">
+            <div class="service-name">
+              {{if
+              .Subdomain}}{{.Subdomain}}.proxy.localhost{{else}}proxy.localhost{{end}}
+            </div>
+            <div class="log-count">
+              {{len .RecentLogs}} line{{if ne (len .RecentLogs) 1}}s{{end}}
+            </div>
+          </div>
+          <div class="service-meta">
+            <div class="service-source">
+              {{template "docker-icon"}}<span>Docker</span>
+            </div>
+            {{if .DockerHasAutoName}}<span class="badge badge-warning"
+              >auto-name</span
+            >{{end}} {{if and .DockerPorts (gt (len .DockerPorts) 1)}}
+            <span
+              title="{{range $i, $p := .DockerPorts}}{{if $i}}, {{end}}:{{$p.Port}}{{end}}"
+              >:{{.Port}} (+{{len .DockerPorts | add -1}})</span
+            >
+            {{else}}
+            <span
+              >{{if .TCPPort}}tcp:{{.TCPPort}}{{else}}:{{.Port}}{{end}}</span
+            >
+            {{end}}
+            <span style="margin-left: auto">{{or .ServiceProtocol "?"}}</span>
+          </div>
+        </a>
+        {{end}} {{range .UnroutedContainers}}
         <div class="service-item" style="opacity: 0.6">
           <div class="service-header">
             <div class="service-name">{{.Name}}</div>
@@ -395,58 +426,166 @@
           <div>{{len .Routes}} processes</div>
         </div>
         {{range .Routes}}
-        <div class="grouped-item-wrapper">{{template "service-item" .}}</div>
-        {{end}} {{end}} {{range .UngroupedProcesses}}{{template "service-item"
-        .}}{{end}} {{end}} {{if .WellKnownRoutes}}
+        <div class="grouped-item-wrapper">
+          <a
+            class="service-item{{if eq $.SelectedSubdomain .Subdomain}} active{{end}}"
+            href="/?service={{.Subdomain}}"
+          >
+            <div class="service-header">
+              <div class="service-name">
+                {{if
+                .Subdomain}}{{.Subdomain}}.proxy.localhost{{else}}proxy.localhost{{end}}
+              </div>
+              <div class="log-count">
+                {{len .RecentLogs}} line{{if ne (len .RecentLogs) 1}}s{{end}}
+              </div>
+            </div>
+            <div class="service-meta">
+              {{if .NeedsCustomMapping}}<span class="badge badge-warning"
+                >needs mapping</span
+              >{{end}}
+              <span>:{{.Port}}</span>
+              {{if .DisplayPath}}
+              <div class="service-path" title="{{.DisplayPath}}">
+                {{.DisplayPath}}
+              </div>
+              {{end}}
+              <span style="margin-left: auto">{{or .ServiceProtocol "?"}}</span>
+            </div>
+          </a>
+        </div>
+        {{end}} {{end}} {{range .UngroupedProcesses}}
+        <a
+          class="service-item{{if eq $.SelectedSubdomain .Subdomain}} active{{end}}"
+          href="/?service={{.Subdomain}}"
+        >
+          <div class="service-header">
+            <div class="service-name">
+              {{if
+              .Subdomain}}{{.Subdomain}}.proxy.localhost{{else}}proxy.localhost{{end}}
+            </div>
+            <div class="log-count">
+              {{len .RecentLogs}} line{{if ne (len .RecentLogs) 1}}s{{end}}
+            </div>
+          </div>
+          <div class="service-meta">
+            {{if .NeedsCustomMapping}}<span class="badge badge-warning"
+              >needs mapping</span
+            >{{end}}
+            <span>:{{.Port}}</span>
+            {{if .DisplayPath}}
+            <div class="service-path" title="{{.DisplayPath}}">
+              {{.DisplayPath}}
+            </div>
+            {{end}}
+            <span style="margin-left: auto">{{or .ServiceProtocol "?"}}</span>
+          </div>
+        </a>
+        {{end}} {{end}} {{if .WellKnownRoutes}}
         <div class="section-divider">Well-Known Services</div>
-        {{range .WellKnownRoutes}}{{template "service-item" .}}{{end}} {{end}}
-        {{if .DisabledRoutes}}
+        {{range .WellKnownRoutes}}
+        <a
+          class="service-item{{if eq $.SelectedSubdomain .Subdomain}} active{{end}}"
+          href="/?service={{.Subdomain}}"
+        >
+          <div class="service-header">
+            <div class="service-name">
+              {{if
+              .Subdomain}}{{.Subdomain}}.proxy.localhost{{else}}proxy.localhost{{end}}
+            </div>
+            <div class="log-count">
+              {{len .RecentLogs}} line{{if ne (len .RecentLogs) 1}}s{{end}}
+            </div>
+          </div>
+          <div class="service-meta">
+            {{if .IsDocker}}
+            <div class="service-source">
+              {{template "docker-icon"}}<span>Docker</span>
+            </div>
+            {{end}}
+            <span class="badge badge-wellknown"
+              >{{if .Subdomain}}auto{{else}}self{{end}}</span
+            >
+            <span>:{{.Port}}</span>
+            <span style="margin-left: auto">{{or .ServiceProtocol "?"}}</span>
+          </div>
+        </a>
+        {{end}} {{end}} {{if .DisabledRoutes}}
         <div class="section-divider">Disabled Routes</div>
-        {{range .DisabledRoutes}}{{template "service-item" .}}{{end}} {{end}}
-        {{if and (not .DockerRoutes) (not .ProcessGroups) (not
+        {{range .DisabledRoutes}}
+        <a
+          class="service-item{{if eq $.SelectedSubdomain .Subdomain}} active{{end}}"
+          href="/?service={{.Subdomain}}"
+        >
+          <div class="service-header">
+            <div class="service-name">
+              {{if
+              .Subdomain}}{{.Subdomain}}.proxy.localhost{{else}}proxy.localhost{{end}}
+            </div>
+            <div class="log-count">
+              {{len .RecentLogs}} line{{if ne (len .RecentLogs) 1}}s{{end}}
+            </div>
+          </div>
+          <div class="service-meta">
+            <span>:{{.Port}}</span>
+            <span style="margin-left: auto">{{or .ServiceProtocol "?"}}</span>
+          </div>
+        </a>
+        {{end}} {{end}} {{if and (not .DockerRoutes) (not .ProcessGroups) (not
         .UngroupedProcesses) (not .WellKnownRoutes) (not .DisabledRoutes)}}
         <div class="detail-empty">No active services</div>
         {{end}}
       </div>
 
       <div class="detail-panel">
-        <div id="detail-empty" class="detail-empty">
-          Select a service to view details
-        </div>
-        <div id="detail-content" class="detail-content" style="display: none">
+        {{if .SelectedRoute}}
+        <div class="detail-content">
           <div class="process-info">
-            <a class="process-title" id="detail-title" target="_blank"></a>
+            <a
+              class="process-title"
+              href="https://{{if .SelectedRoute.Subdomain}}{{.SelectedRoute.Subdomain}}.{{end}}proxy.localhost"
+              target="_blank"
+            >
+              https://{{if
+              .SelectedRoute.Subdomain}}{{.SelectedRoute.Subdomain}}.{{end}}proxy.localhost
+            </a>
             <div class="metrics-grid">
               <div class="metric-card">
                 <div class="metric-label">Packets / Bytes</div>
-                <div class="metric-value" id="metric-packets">
-                  <span id="packets-value">0</span>
+                <div class="metric-value">
+                  <span>0</span>
                   <span class="metric-unit">rx</span>
-                  <span style="margin-left: 1rem" id="packets-tx">0</span>
+                  <span style="margin-left: 1rem">0</span>
                   <span class="metric-unit">tx</span>
                 </div>
               </div>
               <div class="metric-card">
                 <div class="metric-label">Uptime</div>
-                <div class="metric-value" id="metric-uptime">-</div>
+                <div class="metric-value">-</div>
               </div>
             </div>
             <div class="info-grid">
               <div class="info-item">
                 <span class="info-label">PID:</span>
-                <span class="info-value" id="info-pid">-</span>
+                <span class="info-value"
+                  >{{if
+                  .SelectedRoute.PID}}{{.SelectedRoute.PID}}{{else}}-{{end}}</span
+                >
               </div>
               <div class="info-item">
                 <span class="info-label">User:</span>
-                <span class="info-value" id="info-user">-</span>
+                <span class="info-value">-</span>
               </div>
               <div class="info-item">
                 <span class="info-label">Port:</span>
-                <span class="info-value" id="info-port">-</span>
+                <span class="info-value">{{.SelectedPortDisplay}}</span>
               </div>
               <div class="info-item">
                 <span class="info-label">Working Dir:</span>
-                <span class="info-value" id="info-cwd">-</span>
+                <span class="info-value"
+                  >{{if
+                  .SelectedRoute.Cwd}}{{.SelectedRoute.Cwd}}{{else}}-{{end}}</span
+                >
               </div>
             </div>
           </div>
@@ -454,117 +593,42 @@
             <div class="logs-header">
               <div class="logs-title">Live Logs</div>
               <a
-                href="#"
+                href="/logs?subdomain={{.SelectedRoute.Subdomain}}"
                 class="btn btn-primary"
-                id="full-logs-btn"
                 target="_blank"
                 >Full Logs</a
               >
             </div>
-            <div class="logs-container" id="logs-container">
-              <div class="no-logs">No recent logs</div>
+            <div class="logs-with-ports">
+              {{if and .SelectedPorts (gt (len .SelectedPorts) 1)}}
+              <div class="port-list">
+                {{range .SelectedPorts}}
+                <div
+                  class="port-item{{if eq .Port $.SelectedRoute.Port}} active{{end}}"
+                >
+                  <span class="port-arrow"
+                    >{{if eq .Port $.SelectedRoute.Port}}&gt;{{end}}</span
+                  >
+                  <span>:{{.Text}}</span>
+                  <span class="port-protocol">{{or .Protocol "?"}}</span>
+                </div>
+                {{end}}
+              </div>
+              {{end}}
+              <div class="logs-container">
+                {{if .SelectedLogs}} {{range .SelectedLogs}}
+                <div class="log-line">{{.}}</div>
+                {{end}} {{else}}
+                <div class="no-logs">No recent logs</div>
+                {{end}}
+              </div>
             </div>
           </div>
         </div>
+        {{else}}
+        <div class="detail-empty">Select a service to view details</div>
+        {{end}}
       </div>
     </div>
-
-    <script src="https://cdn.jsdelivr.net/npm/ansi_up@5.2.1/ansi_up.min.js"></script>
-    <script>
-      const ansi_up = new AnsiUp();
-      const routesData = {{.RoutesJSON}};
-      let selectedSubdomain = null;
-
-      function selectService(subdomain) {
-        selectedSubdomain = subdomain;
-
-        document.querySelectorAll('.service-item').forEach(el => {
-          el.classList.remove('active');
-        });
-        document.querySelector(`[data-subdomain="${subdomain}"]`).classList.add('active');
-
-        document.getElementById('detail-empty').style.display = 'none';
-        document.getElementById('detail-content').style.display = 'flex';
-
-        const route = routesData[subdomain];
-        if (!route) return;
-
-        const url = `https://${subdomain ? `${subdomain}.` : ''}proxy.localhost`;
-        document.getElementById('detail-title').textContent = url;
-        document.getElementById('detail-title').href = url;
-        document.getElementById('info-pid').textContent = route.PID || '-';
-        document.getElementById('info-user').textContent = '-';
-        let portText = route.TCPPort ? `tcp:${route.TCPPort}` : `:${route.Port}`;
-        if (route.DockerPorts && route.DockerPorts.length > 0) {
-          const portsByNumber = {};
-          for (const p of route.DockerPorts) {
-            if (!portsByNumber[p.Port]) {
-              portsByNumber[p.Port] = new Set();
-            }
-            portsByNumber[p.Port].add(p.Type);
-          }
-          portText = Object.entries(portsByNumber).map(([port, types]) => {
-            if (types.has('tcp') && types.has('udp')) {
-              return `:${port}`;
-            }
-            return `:${port}/${[...types].join(',')}`;
-          }).join(', ');
-        }
-        document.getElementById('info-port').textContent = portText;
-        document.getElementById('info-cwd').textContent = route.Cwd || '-';
-        document.getElementById('metric-uptime').textContent = '-';
-        document.getElementById('packets-value').textContent = '0';
-        document.getElementById('packets-tx').textContent = '0';
-        document.getElementById('full-logs-btn').href = `/logs?subdomain=${subdomain}`;
-
-        renderServiceLogs(subdomain);
-      }
-
-      function renderServiceLogs(subdomain) {
-        const logsContainer = document.getElementById('logs-container');
-        const logsData = {{.LogsMapJSON}};
-        const logs = logsData[subdomain];
-
-        logsContainer.innerHTML = '';
-
-        if (logs && logs.length > 0) {
-          logs.forEach(line => {
-            const lineDiv = document.createElement('div');
-            lineDiv.className = 'log-line';
-            lineDiv.innerHTML = ansi_up.ansi_to_html(line);
-            logsContainer.appendChild(lineDiv);
-          });
-          logsContainer.scrollTop = logsContainer.scrollHeight;
-        } else {
-          logsContainer.innerHTML = '<div class="no-logs">No recent logs</div>';
-        }
-      }
-
-      function updateLogCounts(logsData) {
-        for (const [subdomain, logs] of Object.entries(logsData)) {
-          const countEl = document.getElementById(`count-${subdomain}`);
-          if (countEl) {
-            const count = logs ? logs.length : 0;
-            countEl.textContent = `${count} line${count !== 1 ? 's' : ''}`;
-          }
-        }
-
-        if (selectedSubdomain) {
-          renderServiceLogs(selectedSubdomain);
-        }
-      }
-
-      updateLogCounts({{.LogsMapJSON}});
-
-      setInterval(async () => {
-        try {
-          const response = await fetch('/api/logs-preview');
-          const data = await response.json();
-          updateLogCounts(data);
-        } catch (err) {
-          console.error('Failed to fetch logs:', err);
-        }
-      }, 2000);
-    </script>
   </body>
 </html>

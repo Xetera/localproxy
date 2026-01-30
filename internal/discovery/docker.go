@@ -325,8 +325,26 @@ func (w *DockerWatcher) waitForHealthy(containerID string) {
 }
 
 func (w *DockerWatcher) DiscoverServiceInfo(svc DiscoveredService, onDiscovered func(DiscoveredService)) {
-	log.Printf("docker: starting service discovery for %s at %s:%d", svc.Subdomain, svc.IP, svc.Port)
-	targets := []ScanTarget{{IP: svc.IP, Port: svc.Port}}
+	if svc.Docker == nil {
+		return
+	}
+
+	var targets []ScanTarget
+	portToIndex := make(map[int][]int)
+
+	for i, dp := range svc.Docker.Ports {
+		if dp.Type != "tcp" {
+			continue
+		}
+		targets = append(targets, ScanTarget{IP: dp.IP, Port: dp.Port})
+		portToIndex[dp.Port] = append(portToIndex[dp.Port], i)
+	}
+
+	if len(targets) == 0 {
+		return
+	}
+
+	log.Printf("docker: starting service discovery for %s on %d ports", svc.Subdomain, len(targets))
 	results := make(chan []ServiceInfo, 1)
 	DiscoverServices(w.ctx, targets, results)
 
@@ -340,8 +358,23 @@ func (w *DockerWatcher) DiscoverServiceInfo(svc DiscoveredService, onDiscovered 
 			log.Printf("docker: no services discovered for %s", svc.Subdomain)
 			return
 		}
-		log.Printf("docker: discovered service for %s: protocol=%s", svc.Subdomain, services[0].Protocol)
-		svc.Service = &services[0]
+
+		for _, s := range services {
+			if indices, ok := portToIndex[s.Port]; ok {
+				for _, idx := range indices {
+					svc.Docker.Ports[idx].ServiceProtocol = s.Protocol
+				}
+			}
+			if s.Port == svc.Port {
+				svc.Service = &s
+			}
+		}
+
+		if svc.Service == nil && len(services) > 0 {
+			svc.Service = &services[0]
+		}
+
+		log.Printf("docker: discovered %d services for %s", len(services), svc.Subdomain)
 		onDiscovered(svc)
 	}()
 }
