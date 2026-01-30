@@ -201,9 +201,6 @@ func (w *DockerWatcher) parseContainer(c container.Summary) (*DiscoveredService,
 }
 
 func (w *DockerWatcher) watchEvents() {
-	resyncTicker := time.NewTicker(30 * time.Second)
-	defer resyncTicker.Stop()
-
 	for {
 		eventsChan, errChan := w.client.Events(w.ctx, events.ListOptions{
 			Filters: filters.NewArgs(
@@ -214,7 +211,7 @@ func (w *DockerWatcher) watchEvents() {
 			),
 		})
 
-		if err := w.handleEventStream(eventsChan, errChan, resyncTicker.C); err != nil {
+		if err := w.handleEventStream(eventsChan, errChan); err != nil {
 			select {
 			case <-w.ctx.Done():
 				return
@@ -228,7 +225,7 @@ func (w *DockerWatcher) watchEvents() {
 	}
 }
 
-func (w *DockerWatcher) handleEventStream(eventsChan <-chan events.Message, errChan <-chan error, resync <-chan time.Time) error {
+func (w *DockerWatcher) handleEventStream(eventsChan <-chan events.Message, errChan <-chan error) error {
 	for {
 		select {
 		case <-w.ctx.Done():
@@ -237,29 +234,12 @@ func (w *DockerWatcher) handleEventStream(eventsChan <-chan events.Message, errC
 			if !ok {
 				return fmt.Errorf("event channel closed")
 			}
-			w.resync()
 			if event.Action == "start" && w.onHealthy != nil {
 				go w.waitForHealthy(event.Actor.ID)
 			}
 		case err := <-errChan:
 			return fmt.Errorf("event stream: %w", err)
-		case <-resync:
-			w.resync()
 		}
-	}
-}
-
-func (w *DockerWatcher) resync() {
-	containers, unrouted, err := w.listContainers()
-	if err != nil {
-		log.Printf("docker: failed to list containers: %v", err)
-		return
-	}
-	if w.onChange != nil {
-		w.onChange(containers)
-	}
-	if w.onUnroutedChanged != nil {
-		w.onUnroutedChanged(unrouted)
 	}
 }
 
