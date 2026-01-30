@@ -19,6 +19,8 @@ import (
 	"github.com/xetera/localproxy/internal/discovery"
 )
 
+var traceWarned bool = false
+
 //go:embed trace.d
 var dtraceScript string
 
@@ -270,8 +272,9 @@ func (lm *LogManager) drainBuffer(buffer *LogBuffer, src *bytes.Buffer) {
 func (lm *LogManager) UpdateRoutes(routes []Route) {
 	activeKeys := make(map[string]bool)
 
-	if !lm.traceProcessLogs {
+	if !lm.traceProcessLogs && traceWarned {
 		log.Println("logmanager: Skipping process tracing because it wasn't turned on with `--trace-process-logs`")
+		traceWarned = true
 	}
 
 	for _, route := range routes {
