@@ -279,7 +279,6 @@ func (s *DashboardServer) serveDashboard(w http.ResponseWriter, r *http.Request)
 	var processGroups []ProcessGroup
 	groupedDisplayCwds := make(map[string]bool)
 	var ungroupedProcesses []RouteWithLogs
-	fmt.Println(displayCwdCounts)
 
 	for _, r := range processRoutesWithDisplay {
 		if r.displayCwd != "" && displayCwdCounts[r.displayCwd] > 1 {
