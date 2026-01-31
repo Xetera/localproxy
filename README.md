@@ -1,5 +1,7 @@
 # Localproxy
 
+[![Build](https://github.com/Xetera/localproxy/actions/workflows/build.yml/badge.svg)](https://github.com/Xetera/localproxy/actions/workflows/build.yml)
+
 ```sh
 cd ~/projects/coolproject
 PORT=$(random) npm run dev
@@ -9,7 +11,7 @@ curl https://coolproject.localhost
 
 ![](./showcase.jpg)
 
-Programming is both my job and my hobby, and I have the convenience of using the same laptop for both. At work, the webservers in our monorepo use ports 3000-3005. And because we do a lot of testing with databases, I often end up having postgres running on the standard 5432 but also weird ones like, 5431, 5454, not knowing which instance exposes which port. At home, my own projects are an even bigger mess, running on 3030, 8080, 8081, 7000, you name it. I hate having to remember these random numbers.
+I hate having to remember random port numbers.
 
 Localproxy solves this problem for me. It runs envoy on port 80 and 443 with a self-signed certificate using [mkcert](https://github.com/FiloSottile/mkcert), and auto-discovers targets from both docker using `EXPOSE` fields and [labels](#docker-example-with-labels), and local processes listening to ports running directly under a given "projects" folder. To allow for non-browser tools to also function, the current running processes are also appended to `/etc/hosts` to make sure they point to 127.0.0.1, and are not resolved through external DNS. This is not already the default behavior on macos for some reason.
 
