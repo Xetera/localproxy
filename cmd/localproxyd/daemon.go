@@ -43,8 +43,6 @@ type Daemon struct {
 	dockerWatcher   *discovery.DockerWatcher
 	notifier        *notification.Notifier
 
-	certPath       string
-	keyPath        string
 	seenBackends   map[string]bool
 	watcherStarted bool
 	logFile        *os.File
@@ -142,11 +140,7 @@ func (d *Daemon) initHosts() error {
 
 func (d *Daemon) initCerts() error {
 	d.certMgr = certs.NewCertManager(d.dataDir)
-	if err := d.certMgr.Init(); err != nil {
-		return err
-	}
-	d.certPath, d.keyPath = d.certMgr.GetWildcardCert()
-	return nil
+	return d.certMgr.Init()
 }
 
 func (d *Daemon) initXDS() error {
@@ -174,12 +168,21 @@ func (d *Daemon) initRouting() error {
 	d.dashboardServer = proxy.NewDashboardServer(basePaths, d.config.TraceProcessLogs)
 	d.routeRegistry = registry.NewRouteRegistry(d.onRoutesChanged)
 
-	if err := d.xdsServer.UpdateSnapshot([]xds.Route{}, d.certPath, d.keyPath); err != nil {
+	certPath, keyPath, _ := d.certMgr.GetCert("localhost")
+	initialRoute := xds.Route{
+		Subdomain: "",
+		Host:      "127.0.0.1",
+		Port:      proxy.ServerPort,
+		Protocol:  xds.ProtocolHTTP,
+		CertPath:  certPath,
+		KeyPath:   keyPath,
+	}
+	if err := d.xdsServer.UpdateSnapshot([]xds.Route{initialRoute}); err != nil {
 		return fmt.Errorf("failed to set initial xds snapshot: %v", err)
 	}
 
 	if d.hostsMgr != nil {
-		if err := d.hostsMgr.Update([]string{"proxy"}); err != nil {
+		if err := d.hostsMgr.Update([]string{""}); err != nil {
 			return fmt.Errorf("failed to set initial hosts: %v", err)
 		}
 	}
@@ -232,19 +235,40 @@ func (d *Daemon) getBasePaths() []string {
 func (d *Daemon) onRoutesChanged(routes []proxy.Route) {
 	d.dashboardServer.UpdateRoutes(routes)
 
-	var xdsRoutes []xds.Route
+	certPath, keyPath, _ := d.certMgr.GetCert("localhost")
+	xdsRoutes := []xds.Route{{
+		Subdomain: "",
+		Host:      "127.0.0.1",
+		Port:      proxy.ServerPort,
+		Protocol:  xds.ProtocolHTTP,
+		CertPath:  certPath,
+		KeyPath:   keyPath,
+	}}
 	var subdomains []string
 
 	for _, r := range routes {
 		if r.Disabled {
 			continue
 		}
+
+		certKey := r.Subdomain
+		if certKey == "" {
+			certKey = "localhost"
+		}
+		if err := d.certMgr.EnsureCert(certKey); err != nil {
+			log.Printf("failed to generate cert for %s: %v", certKey, err)
+			continue
+		}
+		certPath, keyPath, _ := d.certMgr.GetCert(certKey)
+
 		xdsRoute := xds.Route{
 			Subdomain: r.Subdomain,
 			Host:      r.Host,
 			Port:      r.Port,
 			TCPPort:   r.TCPPort,
 			Protocol:  xds.ProtocolHTTP,
+			CertPath:  certPath,
+			KeyPath:   keyPath,
 		}
 		if r.TCPPort > 0 {
 			xdsRoute.Protocol = xds.ProtocolTCP
@@ -253,7 +277,7 @@ func (d *Daemon) onRoutesChanged(routes []proxy.Route) {
 		subdomains = append(subdomains, r.Subdomain)
 	}
 
-	if err := d.xdsServer.UpdateSnapshot(xdsRoutes, d.certPath, d.keyPath); err != nil {
+	if err := d.xdsServer.UpdateSnapshot(xdsRoutes); err != nil {
 		log.Printf("failed to update xds snapshot: %v", err)
 	}
 

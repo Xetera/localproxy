@@ -66,8 +66,8 @@ func (s *Server) SetHTTPSRedirect(enabled bool) {
 	s.httpsRedirect = enabled
 }
 
-func (s *Server) UpdateSnapshot(routes []Route, certPath, keyPath string) error {
-	snap, err := s.snapshot.Build(routes, certPath, keyPath, s.httpsRedirect)
+func (s *Server) UpdateSnapshot(routes []Route) error {
+	snap, err := s.snapshot.Build(routes, s.httpsRedirect)
 	if err != nil {
 		return fmt.Errorf("failed to build snapshot: %w", err)
 	}

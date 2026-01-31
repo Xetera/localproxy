@@ -22,7 +22,7 @@ func NewNotifier() *Notifier {
 
 func (n *Notifier) NotifyBackend(subdomain string, isDocker bool) error {
 	title := "New Proxy Backend"
-	message := subdomain + ".proxy.localhost is now available"
+	message := subdomain + ".localhost is now available"
 
 	if runtime.GOOS == "darwin" {
 		emoji := getEmoji(isDocker)

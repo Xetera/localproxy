@@ -36,6 +36,8 @@ type Route struct {
 	Port      int
 	TCPPort   int
 	Protocol  Protocol
+	CertPath  string
+	KeyPath   string
 }
 
 type SnapshotBuilder struct {
@@ -46,97 +48,164 @@ func NewSnapshotBuilder() *SnapshotBuilder {
 	return &SnapshotBuilder{version: 0}
 }
 
-func (b *SnapshotBuilder) Build(routes []Route, certPath, keyPath string, httpsRedirect bool) (*cache.Snapshot, error) {
+func (b *SnapshotBuilder) Build(routes []Route, httpsRedirect bool) (*cache.Snapshot, error) {
 	b.version++
 	versionStr := fmt.Sprintf("%d", b.version)
 
 	var clusters []types.Resource
 	var httpsFilterChains []*listener.FilterChain
+	var quicFilterChains []*listener.FilterChain
 	var httpFilterChains []*listener.FilterChain
 	var virtualHosts []*route.VirtualHost
+	var secrets []types.Resource
 
-	secrets := []types.Resource{
-		&tls.Secret{
-			Name: "wildcard_cert",
+	seenCerts := make(map[string]bool)
+	for _, r := range routes {
+		if r.CertPath == "" || r.KeyPath == "" {
+			continue
+		}
+		secretName := "cert_" + r.Subdomain
+		if r.Subdomain == "" {
+			secretName = "cert_localhost"
+		}
+		if seenCerts[secretName] {
+			continue
+		}
+		seenCerts[secretName] = true
+		secrets = append(secrets, &tls.Secret{
+			Name: secretName,
 			Type: &tls.Secret_TlsCertificate{
 				TlsCertificate: &tls.TlsCertificate{
 					CertificateChain: &core.DataSource{
-						Specifier: &core.DataSource_Filename{Filename: certPath},
+						Specifier: &core.DataSource_Filename{Filename: r.CertPath},
 					},
 					PrivateKey: &core.DataSource{
-						Specifier: &core.DataSource_Filename{Filename: keyPath},
+						Specifier: &core.DataSource_Filename{Filename: r.KeyPath},
 					},
 				},
 			},
-		},
-	}
-
-	tlsContext := &tls.DownstreamTlsContext{
-		CommonTlsContext: &tls.CommonTlsContext{
-
-			AlpnProtocols: []string{"h2" /* required for proxying pg */, "postgresql"},
-			TlsCertificateSdsSecretConfigs: []*tls.SdsSecretConfig{{
-				Name: "wildcard_cert",
-				SdsConfig: &core.ConfigSource{
-					ResourceApiVersion: core.ApiVersion_V3,
-					ConfigSourceSpecifier: &core.ConfigSource_Ads{
-						Ads: &core.AggregatedConfigSource{},
-					},
-				},
-			}},
-		},
-	}
-
-	tlsContextAny, _ := anypb.New(tlsContext)
-
-	tlsTransportSocket := &core.TransportSocket{
-		Name:       "envoy.transport_sockets.tls",
-		ConfigType: &core.TransportSocket_TypedConfig{TypedConfig: tlsContextAny},
-	}
-
-	quicTlsContext := &tls.DownstreamTlsContext{
-		CommonTlsContext: &tls.CommonTlsContext{
-			AlpnProtocols: []string{"h3"},
-			TlsCertificateSdsSecretConfigs: []*tls.SdsSecretConfig{{
-				Name: "wildcard_cert",
-				SdsConfig: &core.ConfigSource{
-					ResourceApiVersion: core.ApiVersion_V3,
-					ConfigSourceSpecifier: &core.ConfigSource_Ads{
-						Ads: &core.AggregatedConfigSource{},
-					},
-				},
-			}},
-		},
-	}
-
-	quicDownstream := &quic.QuicDownstreamTransport{
-		DownstreamTlsContext: quicTlsContext,
-	}
-	quicDownstreamAny, _ := anypb.New(quicDownstream)
-
-	quicTransportSocket := &core.TransportSocket{
-		Name:       "envoy.transport_sockets.quic",
-		ConfigType: &core.TransportSocket_TypedConfig{TypedConfig: quicDownstreamAny},
+		})
 	}
 
 	routerFilter, _ := anypb.New(&router.Router{})
 
+	httpsHcm := &hcm.HttpConnectionManager{
+		CodecType:             hcm.HttpConnectionManager_AUTO,
+		StatPrefix:            "https_ingress",
+		StreamIdleTimeout:     durationpb.New(0),
+		RequestTimeout:        durationpb.New(0),
+		RequestHeadersTimeout: durationpb.New(0),
+		RouteSpecifier: &hcm.HttpConnectionManager_Rds{
+			Rds: &hcm.Rds{
+				ConfigSource: &core.ConfigSource{
+					ResourceApiVersion: core.ApiVersion_V3,
+					ConfigSourceSpecifier: &core.ConfigSource_Ads{
+						Ads: &core.AggregatedConfigSource{},
+					},
+				},
+				RouteConfigName: "local_route",
+			},
+		},
+		HttpFilters: []*hcm.HttpFilter{{
+			Name:       "envoy.filters.http.router",
+			ConfigType: &hcm.HttpFilter_TypedConfig{TypedConfig: routerFilter},
+		}},
+	}
+	httpsHcmAny, _ := anypb.New(httpsHcm)
+
+	http3Hcm := &hcm.HttpConnectionManager{
+		CodecType:             hcm.HttpConnectionManager_HTTP3,
+		StatPrefix:            "http3_ingress",
+		StreamIdleTimeout:     durationpb.New(0),
+		RequestTimeout:        durationpb.New(0),
+		RequestHeadersTimeout: durationpb.New(0),
+		RouteSpecifier: &hcm.HttpConnectionManager_Rds{
+			Rds: &hcm.Rds{
+				ConfigSource: &core.ConfigSource{
+					ResourceApiVersion: core.ApiVersion_V3,
+					ConfigSourceSpecifier: &core.ConfigSource_Ads{
+						Ads: &core.AggregatedConfigSource{},
+					},
+				},
+				RouteConfigName: "local_route",
+			},
+		},
+		HttpFilters: []*hcm.HttpFilter{{
+			Name:       "envoy.filters.http.router",
+			ConfigType: &hcm.HttpFilter_TypedConfig{TypedConfig: routerFilter},
+		}},
+	}
+	http3HcmAny, _ := anypb.New(http3Hcm)
+
 	tcpListenerChains := make(map[int][]*listener.FilterChain)
 	tcpListenerNeedsTLS := make(map[int]bool)
 	usedPorts := make(map[int]bool)
+	seenSubdomains := make(map[string]bool)
 
 	for _, r := range routes {
+		if seenSubdomains[r.Subdomain] {
+			continue
+		}
+		seenSubdomains[r.Subdomain] = true
 		var clusterName string
 		var sniDomains []string
 		if r.Subdomain == "" {
 			clusterName = "cluster_root"
-			sniDomains = []string{"proxy.localhost", "proxy.internal"}
+			sniDomains = []string{"localhost", "proxy.localhost", "proxy.internal"}
 		} else {
 			clusterName = r.Subdomain
 			sniDomains = []string{
-				fmt.Sprintf("%s.proxy.localhost", r.Subdomain),
-				fmt.Sprintf("%s.proxy.internal", r.Subdomain),
+				fmt.Sprintf("%s.localhost", r.Subdomain),
+				fmt.Sprintf("%s.internal", r.Subdomain),
 			}
+		}
+
+		secretName := "cert_" + r.Subdomain
+		if r.Subdomain == "" {
+			secretName = "cert_localhost"
+		}
+
+		tlsContext := &tls.DownstreamTlsContext{
+			CommonTlsContext: &tls.CommonTlsContext{
+				AlpnProtocols: []string{"h2", "postgresql"},
+				TlsCertificateSdsSecretConfigs: []*tls.SdsSecretConfig{{
+					Name: secretName,
+					SdsConfig: &core.ConfigSource{
+						ResourceApiVersion: core.ApiVersion_V3,
+						ConfigSourceSpecifier: &core.ConfigSource_Ads{
+							Ads: &core.AggregatedConfigSource{},
+						},
+					},
+				}},
+			},
+		}
+		tlsContextAny, _ := anypb.New(tlsContext)
+		tlsTransportSocket := &core.TransportSocket{
+			Name:       "envoy.transport_sockets.tls",
+			ConfigType: &core.TransportSocket_TypedConfig{TypedConfig: tlsContextAny},
+		}
+
+		quicTlsContext := &tls.DownstreamTlsContext{
+			CommonTlsContext: &tls.CommonTlsContext{
+				AlpnProtocols: []string{"h3"},
+				TlsCertificateSdsSecretConfigs: []*tls.SdsSecretConfig{{
+					Name: secretName,
+					SdsConfig: &core.ConfigSource{
+						ResourceApiVersion: core.ApiVersion_V3,
+						ConfigSourceSpecifier: &core.ConfigSource_Ads{
+							Ads: &core.AggregatedConfigSource{},
+						},
+					},
+				}},
+			},
+		}
+		quicDownstream := &quic.QuicDownstreamTransport{
+			DownstreamTlsContext: quicTlsContext,
+		}
+		quicDownstreamAny, _ := anypb.New(quicDownstream)
+		quicTransportSocket := &core.TransportSocket{
+			Name:       "envoy.transport_sockets.quic",
+			ConfigType: &core.TransportSocket_TypedConfig{TypedConfig: quicDownstreamAny},
 		}
 
 		clusterType := cluster.Cluster_STATIC
@@ -221,6 +290,30 @@ func (b *SnapshotBuilder) Build(routes []Route, certPath, keyPath string, httpsR
 					},
 				}},
 			})
+
+			if r.CertPath != "" && r.KeyPath != "" {
+				httpsFilterChains = append(httpsFilterChains, &listener.FilterChain{
+					FilterChainMatch: &listener.FilterChainMatch{
+						ServerNames: sniDomains,
+					},
+					TransportSocket: tlsTransportSocket,
+					Filters: []*listener.Filter{{
+						Name:       "envoy.filters.network.http_connection_manager",
+						ConfigType: &listener.Filter_TypedConfig{TypedConfig: httpsHcmAny},
+					}},
+				})
+
+				quicFilterChains = append(quicFilterChains, &listener.FilterChain{
+					FilterChainMatch: &listener.FilterChainMatch{
+						ServerNames: sniDomains,
+					},
+					TransportSocket: quicTransportSocket,
+					Filters: []*listener.Filter{{
+						Name:       "envoy.filters.network.http_connection_manager",
+						ConfigType: &listener.Filter_TypedConfig{TypedConfig: http3HcmAny},
+					}},
+				})
+			}
 		}
 	}
 
@@ -251,41 +344,6 @@ func (b *SnapshotBuilder) Build(routes []Route, certPath, keyPath string, httpsR
 		routeConfigs = append(routeConfigs, &route.RouteConfiguration{
 			Name:         "local_route",
 			VirtualHosts: virtualHosts,
-		})
-
-		httpsHcm := &hcm.HttpConnectionManager{
-			CodecType:             hcm.HttpConnectionManager_AUTO,
-			StatPrefix:            "https_ingress",
-			StreamIdleTimeout:     durationpb.New(0),
-			RequestTimeout:        durationpb.New(0),
-			RequestHeadersTimeout: durationpb.New(0),
-			RouteSpecifier: &hcm.HttpConnectionManager_Rds{
-				Rds: &hcm.Rds{
-					ConfigSource: &core.ConfigSource{
-						ResourceApiVersion: core.ApiVersion_V3,
-						ConfigSourceSpecifier: &core.ConfigSource_Ads{
-							Ads: &core.AggregatedConfigSource{},
-						},
-					},
-					RouteConfigName: "local_route",
-				},
-			},
-			HttpFilters: []*hcm.HttpFilter{{
-				Name:       "envoy.filters.http.router",
-				ConfigType: &hcm.HttpFilter_TypedConfig{TypedConfig: routerFilter},
-			}},
-		}
-		httpsHcmAny, _ := anypb.New(httpsHcm)
-
-		httpsFilterChains = append(httpsFilterChains, &listener.FilterChain{
-			FilterChainMatch: &listener.FilterChainMatch{
-				ServerNames: []string{"*.proxy.localhost", "proxy.localhost", "*.proxy.internal", "proxy.internal"},
-			},
-			TransportSocket: tlsTransportSocket,
-			Filters: []*listener.Filter{{
-				Name:       "envoy.filters.network.http_connection_manager",
-				ConfigType: &listener.Filter_TypedConfig{TypedConfig: httpsHcmAny},
-			}},
 		})
 
 		var httpHcm *hcm.HttpConnectionManager
@@ -398,40 +456,6 @@ func (b *SnapshotBuilder) Build(routes []Route, certPath, keyPath string, httpsR
 			}},
 			FilterChains: httpsFilterChains,
 		})
-		http3Hcm := &hcm.HttpConnectionManager{
-			CodecType:             hcm.HttpConnectionManager_HTTP3,
-			StatPrefix:            "http3_ingress",
-			StreamIdleTimeout:     durationpb.New(0),
-			RequestTimeout:        durationpb.New(0),
-			RequestHeadersTimeout: durationpb.New(0),
-			RouteSpecifier: &hcm.HttpConnectionManager_Rds{
-				Rds: &hcm.Rds{
-					ConfigSource: &core.ConfigSource{
-						ResourceApiVersion: core.ApiVersion_V3,
-						ConfigSourceSpecifier: &core.ConfigSource_Ads{
-							Ads: &core.AggregatedConfigSource{},
-						},
-					},
-					RouteConfigName: "local_route",
-				},
-			},
-			HttpFilters: []*hcm.HttpFilter{{
-				Name:       "envoy.filters.http.router",
-				ConfigType: &hcm.HttpFilter_TypedConfig{TypedConfig: routerFilter},
-			}},
-		}
-		http3HcmAny, _ := anypb.New(http3Hcm)
-
-		quicFilterChains := []*listener.FilterChain{{
-			FilterChainMatch: &listener.FilterChainMatch{
-				ServerNames: []string{"*.proxy.localhost", "proxy.localhost", "*.proxy.internal", "proxy.internal"},
-			},
-			TransportSocket: quicTransportSocket,
-			Filters: []*listener.Filter{{
-				Name:       "envoy.filters.network.http_connection_manager",
-				ConfigType: &listener.Filter_TypedConfig{TypedConfig: http3HcmAny},
-			}},
-		}}
 
 		listeners = append(listeners, &listener.Listener{
 			Name: "quic_listener",

@@ -38,9 +38,9 @@ func (m *Manager) Update(subdomains []string) error {
 	var hostnames []string
 	for _, sub := range subdomains {
 		if sub == "" {
-			hostnames = append(hostnames, "proxy.localhost", "proxy.internal")
+			hostnames = append(hostnames, "localhost")
 		} else {
-			hostnames = append(hostnames, fmt.Sprintf("%s.proxy.localhost", sub), fmt.Sprintf("%s.proxy.internal", sub))
+			hostnames = append(hostnames, fmt.Sprintf("%s.localhost", sub))
 		}
 	}
 

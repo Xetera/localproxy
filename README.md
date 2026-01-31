@@ -1,6 +1,6 @@
 # Localproxy
 
-`http://localhost:8080 -> https://project.proxy.localhost`
+`http://localhost:8080 -> https://project.localhost`
 
 ![](./showcase.jpg)
 
@@ -35,14 +35,14 @@ cd ~/myprojects/project1
 npm run dev
 # localproxy uses the path passed to --watch to
 # automatically detect processes running in its sub-folders
-curl https://project1.proxy.localhost
+curl https://project1.localhost
 ```
 
 ### Docker example with labels
 
 Proxying traffic to docker containers works without exposing ports using `-p`. Instead you can use the following labels to configure the proxy behavior:
 
-- `localproxy.subdomain` controls the [subdomain].proxy.internal domain
+- `localproxy.subdomain` controls the [subdomain].internal domain
 - `localproxy.port` 443/80 -> $port (used for webservers)
 - `localproxy.tcpport` $tcpport -> $tcpport (used for for tcp servers that listen non non-web ports)
 
@@ -51,7 +51,7 @@ To allow reaching out to localproxy urls _from within_ containers, you need to u
 ##### Using docker run
 
 ```sh
-docker run --add-host=test.proxy.internal:host-gateway alpine/curl https://test.proxy.internal
+docker run --add-host=test.internal:host-gateway alpine/curl https://test.internal
 ```
 
 ##### Using docker-compose
@@ -60,9 +60,9 @@ docker run --add-host=test.proxy.internal:host-gateway alpine/curl https://test.
 services:
   curl:
     image: alpine/curl
-    command: curl https://test.proxy.internal
+    command: curl https://test.internal
     extra_hosts:
-      - test.proxy.internal:host-gateway
+      - test.internal:host-gateway
 ```
 
 #### Postgres
@@ -77,7 +77,7 @@ Two requirements for connection:
 2. `sslnegotiation` has to be `direct` to use TLS instead of STARTTLS
 
 ```sh
-psql "postgresql://postgres@postgres.proxy.localhost/postgres?sslmode=require&sslnegotiation=direct"
+psql "postgresql://postgres@postgres.localhost/postgres?sslmode=require&sslnegotiation=direct"
 ```
 
 #### Redis
@@ -89,9 +89,9 @@ docker run --name myredis -l localproxy.tcpport=6379 redis
 Connect to it from the host without exposing ports. Sadly redis-cli doesn't seem to use the local trust chain on macos. You may be able to omit `--insecure` on other platforms.
 
 ```sh
-redis-cli --tls --insecure -h myredis.proxy.localhost --sni myredis.proxy.localhost
+redis-cli --tls --insecure -h myredis.localhost --sni myredis.localhost
 # If you want to explicitly verify the certificate
-redis-cli --tls --cacert "$(mkcert -CAROOT)/rootCA.pem" -h myredis.proxy.localhost --sni myredis.proxy.localhost
+redis-cli --tls --cacert "$(mkcert -CAROOT)/rootCA.pem" -h myredis.localhost --sni myredis.localhost
 ```
 
 ### Logs

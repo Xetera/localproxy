@@ -381,7 +381,7 @@
           <div class="service-header">
             <div class="service-name">
               {{if
-              .Subdomain}}{{.Subdomain}}.proxy.localhost{{else}}proxy.localhost{{end}}
+              .Subdomain}}{{.Subdomain}}.localhost{{else}}localhost{{end}}
             </div>
             <div class="log-count">
               {{len .RecentLogs}} line{{if ne (len .RecentLogs) 1}}s{{end}}
@@ -434,7 +434,7 @@
             <div class="service-header">
               <div class="service-name">
                 {{if
-                .Subdomain}}{{.Subdomain}}.proxy.localhost{{else}}proxy.localhost{{end}}
+                .Subdomain}}{{.Subdomain}}.localhost{{else}}localhost{{end}}
               </div>
               <div class="log-count">
                 {{len .RecentLogs}} line{{if ne (len .RecentLogs) 1}}s{{end}}
@@ -462,7 +462,7 @@
           <div class="service-header">
             <div class="service-name">
               {{if
-              .Subdomain}}{{.Subdomain}}.proxy.localhost{{else}}proxy.localhost{{end}}
+              .Subdomain}}{{.Subdomain}}.localhost{{else}}localhost{{end}}
             </div>
             <div class="log-count">
               {{len .RecentLogs}} line{{if ne (len .RecentLogs) 1}}s{{end}}
@@ -491,7 +491,7 @@
           <div class="service-header">
             <div class="service-name">
               {{if
-              .Subdomain}}{{.Subdomain}}.proxy.localhost{{else}}proxy.localhost{{end}}
+              .Subdomain}}{{.Subdomain}}.localhost{{else}}localhost{{end}}
             </div>
             <div class="log-count">
               {{len .RecentLogs}} line{{if ne (len .RecentLogs) 1}}s{{end}}
@@ -520,7 +520,7 @@
           <div class="service-header">
             <div class="service-name">
               {{if
-              .Subdomain}}{{.Subdomain}}.proxy.localhost{{else}}proxy.localhost{{end}}
+              .Subdomain}}{{.Subdomain}}.localhost{{else}}localhost{{end}}
             </div>
             <div class="log-count">
               {{len .RecentLogs}} line{{if ne (len .RecentLogs) 1}}s{{end}}
@@ -543,11 +543,11 @@
           <div class="process-info">
             <a
               class="process-title"
-              href="https://{{if .SelectedRoute.Subdomain}}{{.SelectedRoute.Subdomain}}.{{end}}proxy.localhost"
+              href="https://{{if .SelectedRoute.Subdomain}}{{.SelectedRoute.Subdomain}}.{{end}}localhost"
               target="_blank"
             >
               https://{{if
-              .SelectedRoute.Subdomain}}{{.SelectedRoute.Subdomain}}.{{end}}proxy.localhost
+              .SelectedRoute.Subdomain}}{{.SelectedRoute.Subdomain}}.{{end}}localhost
             </a>
             <div class="metrics-grid">
               <div class="metric-card">

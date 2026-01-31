@@ -92,7 +92,7 @@ func (s *DashboardServer) handleRoot(w http.ResponseWriter, r *http.Request) {
 		host = fwdHost
 	}
 
-	if host == "proxy.localhost" || host == "proxy.internal" || host == fmt.Sprintf("127.0.0.1:%d", ServerPort) {
+	if host == "localhost" || host == "proxy.localhost" || host == "proxy.internal" || host == fmt.Sprintf("127.0.0.1:%d", ServerPort) || host == fmt.Sprintf("localhost:%d", ServerPort) {
 		s.serveDashboard(w, r)
 		return
 	}
@@ -114,10 +114,8 @@ func (s *DashboardServer) serve404(w http.ResponseWriter, r *http.Request, host 
 	}
 
 	subdomain := ""
-	if strings.HasSuffix(host, ".proxy.localhost") {
-		subdomain = strings.TrimSuffix(host, ".proxy.localhost")
-	} else if strings.HasSuffix(host, ".proxy.internal") {
-		subdomain = strings.TrimSuffix(host, ".proxy.internal")
+	if strings.HasSuffix(host, ".localhost") {
+		subdomain = strings.TrimSuffix(host, ".localhost")
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
