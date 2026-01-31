@@ -1,6 +1,11 @@
 # Localproxy
 
-`http://localhost:8080 -> https://project.localhost`
+```sh
+cd ~/projects/coolproject
+PORT=$(random) npm run dev
+curl https://coolproject.localhost
+# ✨ it just works like magic
+```
 
 ![](./showcase.jpg)
 
