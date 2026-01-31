@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"sort"
@@ -380,7 +381,7 @@ func (s *DashboardServer) serveDashboard(w http.ResponseWriter, r *http.Request)
 	}
 
 	type PortRepr struct {
-		Port     int
+		Port     uint16
 		Text     string
 		Protocol string
 	}
@@ -396,12 +397,13 @@ func (s *DashboardServer) serveDashboard(w http.ResponseWriter, r *http.Request)
 					tcp             bool
 					serviceProtocol string
 				}
-				portsByNumber := make(map[int]*portInfo)
+				portsByNumber := make(map[uint16]*portInfo)
 				for _, p := range selectedRoute.DockerPorts {
-					if portsByNumber[p.Port] == nil {
-						portsByNumber[p.Port] = &portInfo{}
+					port := p.Endpoint.Port()
+					if portsByNumber[port] == nil {
+						portsByNumber[port] = &portInfo{}
 					}
-					info := portsByNumber[p.Port]
+					info := portsByNumber[port]
 					if p.Type == "udp" {
 						info.udp = true
 					}
@@ -473,16 +475,14 @@ func (s *DashboardServer) serveDashboard(w http.ResponseWriter, r *http.Request)
 
 	templatesPath := getTemplatesPath()
 	funcMap := template.FuncMap{
-		"add": func(a, b int) int { return a + b },
+		"add":  func(a, b int) int { return a + b },
+		"port": func(endpoint netip.AddrPort) uint16 { return endpoint.Port() },
 	}
-	tmpl, err := template.New("dashboard.html").Funcs(funcMap).ParseFiles(filepath.Join(templatesPath, "dashboard.html"))
-	if err != nil {
-		http.Error(w, fmt.Sprintf("template error: %v", err), http.StatusInternalServerError)
-		return
-	}
+	tmpl := template.Must(template.New("dashboard.html").Funcs(funcMap).ParseFiles(filepath.Join(templatesPath, "dashboard.html")))
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	tmpl.Execute(w, map[string]interface{}{
+	if err := tmpl.Execute(w, map[string]any{
+		"TraceProcessLogs":   s.logManager.traceProcessLogs,
 		"EnabledRoutes":      enabledRoutes,
 		"DockerRoutes":       dockerRoutes,
 		"ProcessGroups":      processGroups,
@@ -496,7 +496,9 @@ func (s *DashboardServer) serveDashboard(w http.ResponseWriter, r *http.Request)
 		"SelectedLogs":       selectedLogs,
 		"SelectedPorts":      portRepr,
 		"SelectedStats":      selectedStats,
-	})
+	}); err != nil {
+		log.Printf("template error: %v", err)
+	}
 }
 
 func (s *DashboardServer) serveLogsPreview(w http.ResponseWriter, r *http.Request) {
@@ -554,7 +556,7 @@ func (s *DashboardServer) serveLogs(w http.ResponseWriter, r *http.Request) {
 	tmpl.Execute(w, map[string]interface{}{
 		"Subdomain": route.Subdomain,
 		"PID":       route.PID,
-		"Port":      route.Port,
+		"Port":      route.Endpoint.Port(),
 		"Cwd":       route.Cwd,
 	})
 }

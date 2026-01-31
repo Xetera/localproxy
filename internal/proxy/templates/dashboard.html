@@ -13,10 +13,11 @@
           system-ui,
           -apple-system,
           sans-serif;
-        background: #0a0a0a;
         color: #e5e5e5;
         height: 100vh;
         overflow: hidden;
+        --background: #0a0a0a;
+        background: var(--background);
       }
       a {
         color: inherit;
@@ -206,10 +207,28 @@
         text-transform: uppercase;
         letter-spacing: 0.05em;
       }
+      .logs-background {
+        border-radius: 0.5rem;
+        background: #000;
+        width: 100%;
+        border: 1px solid #262626;
+      }
+      .logs-background[data-disabled="true"] {
+        padding: 0.5rem;
+        --stripe1: #81813d;
+        --stripe2: #313222;
+        background: repeating-linear-gradient(
+          45deg,
+          var(--stripe1),
+          var(--stripe1) 10px,
+          var(--stripe2) 10px,
+          var(--stripe2) 20px
+        );
+      }
       .logs-container {
         flex: 1;
-        background: #000;
-        border: 1px solid #262626;
+        background: var(--background);
+        height: 100%;
         border-radius: 0.5rem;
         padding: 1rem;
         overflow-y: auto;
@@ -221,6 +240,18 @@
         margin-bottom: 0.25rem;
         white-space: pre-wrap;
         word-break: break-all;
+      }
+      .log-disclaimer {
+        max-width: 50%;
+        color: white;
+      }
+      .log-disclaimer b {
+        color: oklch(0.96 0.18 112.69);
+      }
+      .log-disclaimer code {
+        display: inline-flex;
+        background: #1e3a5f;
+        padding: 0 0.25rem;
       }
       .no-logs {
         color: #525252;
@@ -380,8 +411,7 @@
         >
           <div class="service-header">
             <div class="service-name">
-              {{if
-              .Subdomain}}{{.Subdomain}}.localhost{{else}}localhost{{end}}
+              {{if .Subdomain}}{{.Subdomain}}.localhost{{else}}localhost{{end}}
             </div>
             <div class="log-count">
               {{len .RecentLogs}} line{{if ne (len .RecentLogs) 1}}s{{end}}
@@ -395,12 +425,13 @@
               >auto-name</span
             >{{end}} {{if and .DockerPorts (gt (len .DockerPorts) 1)}}
             <span
-              title="{{range $i, $p := .DockerPorts}}{{if $i}}, {{end}}:{{$p.Port}}{{end}}"
-              >:{{.Port}} (+{{len .DockerPorts | add -1}})</span
+              title="{{range $i, $p := .DockerPorts}}{{if $i}}, {{end}}:{{port $p.Endpoint}}{{end}}"
+              >:{{port .Endpoint}} (+{{len .DockerPorts | add -1}})</span
             >
             {{else}}
             <span
-              >{{if .TCPPort}}tcp:{{.TCPPort}}{{else}}:{{.Port}}{{end}}</span
+              >{{if .TCPPort}}tcp:{{.TCPPort}}{{else}}:{{port
+              .Endpoint}}{{end}}</span
             >
             {{end}}
             <span style="margin-left: auto">{{or .ServiceProtocol "?"}}</span>
@@ -444,7 +475,7 @@
               {{if .NeedsCustomMapping}}<span class="badge badge-warning"
                 >needs mapping</span
               >{{end}}
-              <span>:{{.Port}}</span>
+              <span>:{{port .Endpoint}}</span>
               {{if .DisplayPath}}
               <div class="service-path" title="{{.DisplayPath}}">
                 {{.DisplayPath}}
@@ -461,8 +492,7 @@
         >
           <div class="service-header">
             <div class="service-name">
-              {{if
-              .Subdomain}}{{.Subdomain}}.localhost{{else}}localhost{{end}}
+              {{if .Subdomain}}{{.Subdomain}}.localhost{{else}}localhost{{end}}
             </div>
             <div class="log-count">
               {{len .RecentLogs}} line{{if ne (len .RecentLogs) 1}}s{{end}}
@@ -472,7 +502,7 @@
             {{if .NeedsCustomMapping}}<span class="badge badge-warning"
               >needs mapping</span
             >{{end}}
-            <span>:{{.Port}}</span>
+            <span>:{{port .Endpoint}}</span>
             {{if .DisplayPath}}
             <div class="service-path" title="{{.DisplayPath}}">
               {{.DisplayPath}}
@@ -490,8 +520,7 @@
         >
           <div class="service-header">
             <div class="service-name">
-              {{if
-              .Subdomain}}{{.Subdomain}}.localhost{{else}}localhost{{end}}
+              {{if .Subdomain}}{{.Subdomain}}.localhost{{else}}localhost{{end}}
             </div>
             <div class="log-count">
               {{len .RecentLogs}} line{{if ne (len .RecentLogs) 1}}s{{end}}
@@ -506,7 +535,7 @@
             <span class="badge badge-wellknown"
               >{{if .Subdomain}}auto{{else}}self{{end}}</span
             >
-            <span>:{{.Port}}</span>
+            <span>:{{port .Endpoint}}</span>
             <span style="margin-left: auto">{{or .ServiceProtocol "?"}}</span>
           </div>
         </a>
@@ -519,15 +548,14 @@
         >
           <div class="service-header">
             <div class="service-name">
-              {{if
-              .Subdomain}}{{.Subdomain}}.localhost{{else}}localhost{{end}}
+              {{if .Subdomain}}{{.Subdomain}}.localhost{{else}}localhost{{end}}
             </div>
             <div class="log-count">
               {{len .RecentLogs}} line{{if ne (len .RecentLogs) 1}}s{{end}}
             </div>
           </div>
           <div class="service-meta">
-            <span>:{{.Port}}</span>
+            <span>:{{port .Endpoint}}</span>
             <span style="margin-left: auto">{{or .ServiceProtocol "?"}}</span>
           </div>
         </a>
@@ -555,7 +583,9 @@
                 <div class="metric-value">
                   <span>{{.SelectedStats.RxFormatted}}</span>
                   <span class="metric-unit">rx</span>
-                  <span style="margin-left: 1rem">{{.SelectedStats.TxFormatted}}</span>
+                  <span style="margin-left: 1rem"
+                    >{{.SelectedStats.TxFormatted}}</span
+                  >
                   <span class="metric-unit">tx</span>
                 </div>
               </div>
@@ -564,7 +594,9 @@
                 <div class="metric-value">
                   <span>{{.SelectedStats.RxRateFormatted}}</span>
                   <span class="metric-unit">/s rx</span>
-                  <span style="margin-left: 1rem">{{.SelectedStats.TxRateFormatted}}</span>
+                  <span style="margin-left: 1rem"
+                    >{{.SelectedStats.TxRateFormatted}}</span
+                  >
                   <span class="metric-unit">/s tx</span>
                 </div>
               </div>
@@ -573,18 +605,26 @@
                 <div class="metric-value">
                   <span>{{.SelectedStats.RequestsFormatted}}</span>
                   <span class="metric-unit">total</span>
-                  <span style="margin-left: 1rem">{{.SelectedStats.RequestsRateFormatted}}</span>
+                  <span style="margin-left: 1rem"
+                    >{{.SelectedStats.RequestsRateFormatted}}</span
+                  >
                   <span class="metric-unit">/s</span>
                 </div>
               </div>
               <div class="metric-card">
                 <div class="metric-label">Response Codes</div>
                 <div class="metric-value" style="font-size: 1rem">
-                  <span style="color: #22c55e">{{.SelectedStats.HTTP2xxFormatted}}</span>
+                  <span style="color: #22c55e"
+                    >{{.SelectedStats.HTTP2xxFormatted}}</span
+                  >
                   <span class="metric-unit">2xx</span>
-                  <span style="margin-left: 0.5rem; color: #f59e0b">{{.SelectedStats.HTTP4xxFormatted}}</span>
+                  <span style="margin-left: 0.5rem; color: #f59e0b"
+                    >{{.SelectedStats.HTTP4xxFormatted}}</span
+                  >
                   <span class="metric-unit">4xx</span>
-                  <span style="margin-left: 0.5rem; color: #ef4444">{{.SelectedStats.HTTP5xxFormatted}}</span>
+                  <span style="margin-left: 0.5rem; color: #ef4444"
+                    >{{.SelectedStats.HTTP5xxFormatted}}</span
+                  >
                   <span class="metric-unit">5xx</span>
                 </div>
               </div>
@@ -593,9 +633,13 @@
                 <div class="metric-value" style="font-size: 1rem">
                   <span>{{.SelectedStats.HTTP1Formatted}}</span>
                   <span class="metric-unit">H1</span>
-                  <span style="margin-left: 0.5rem">{{.SelectedStats.HTTP2Formatted}}</span>
+                  <span style="margin-left: 0.5rem"
+                    >{{.SelectedStats.HTTP2Formatted}}</span
+                  >
                   <span class="metric-unit">H2</span>
-                  <span style="margin-left: 0.5rem">{{.SelectedStats.HTTP3Formatted}}</span>
+                  <span style="margin-left: 0.5rem"
+                    >{{.SelectedStats.HTTP3Formatted}}</span
+                  >
                   <span class="metric-unit">H3</span>
                 </div>
               </div>
@@ -604,7 +648,9 @@
                 <div class="metric-value" style="font-size: 1rem">
                   <span>{{.SelectedStats.ActiveConnections}}</span>
                   <span class="metric-unit">active</span>
-                  <span style="margin-left: 0.5rem">{{.SelectedStats.DisconnectsFormatted}}</span>
+                  <span style="margin-left: 0.5rem"
+                    >{{.SelectedStats.DisconnectsFormatted}}</span
+                  >
                   <span class="metric-unit">disconnects</span>
                 </div>
               </div>
@@ -649,10 +695,10 @@
               <div class="port-list">
                 {{range .SelectedPorts}}
                 <div
-                  class="port-item{{if eq .Port $.SelectedRoute.Port}} active{{end}}"
+                  class="port-item{{if eq .Port (port $.SelectedRoute.Endpoint)}} active{{end}}"
                 >
                   <span class="port-arrow"
-                    >{{if eq .Port $.SelectedRoute.Port}}&gt;{{end}}</span
+                    >{{if eq .Port (port $.SelectedRoute.Endpoint)}}&gt;{{end}}</span
                   >
                   <span>:{{.Text}}</span>
                   <span class="port-protocol">{{or .Protocol "?"}}</span>
@@ -660,12 +706,40 @@
                 {{end}}
               </div>
               {{end}}
-              <div class="logs-container">
-                {{if .SelectedLogs}} {{range .SelectedLogs}}
-                <div class="log-line">{{.}}</div>
-                {{end}} {{else}}
-                <div class="no-logs">No recent logs</div>
-                {{end}}
+              <div
+                class="logs-background"
+                data-disabled='{{
+                and .SelectedRoute (eq .SelectedRoute.Source "process")
+                                  (not $.TraceProcessLogs)
+                }}'
+              >
+                <div class="logs-container">
+                  <!-- Debug: Source = "{{.SelectedRoute.Source}}" -->
+                  {{if and .SelectedRoute (eq .SelectedRoute.Source "process")
+                  (not $.TraceProcessLogs)}}
+                  <div class="log-disclaimer">
+                    <p>
+                      Logs for processes are disabled. To enable them, run
+                      localproxy with the
+                      <code>--trace-process-logs</code> flag.
+
+                      <br />
+                      <br />
+                      <b>Warning</b>
+                      <br />
+                      Tracing process logs on MacOS requires SIP (System
+                      Integrity Protection) to be (partially) disabled, and
+                      <i>will</i>
+                      cause your system to become unresponsive if you're not on
+                      Tahoe yet.
+                    </p>
+                  </div>
+                  {{else if .SelectedLogs}} {{range .SelectedLogs}}
+                  <div class="log-line">{{.}}</div>
+                  {{end}} {{else}}
+                  <div class="no-logs">No recent logs</div>
+                  {{end}}
+                </div>
               </div>
             </div>
           </div>

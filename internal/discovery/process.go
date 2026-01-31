@@ -3,6 +3,7 @@ package discovery
 import (
 	"context"
 	"log"
+	"net/netip"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -10,9 +11,8 @@ import (
 )
 
 type portEntry struct {
-	PID  int
-	Port int
-	IP   string
+	Endpoint netip.AddrPort
+	PID      int
 }
 
 type ProcessWatcher struct {
@@ -22,7 +22,7 @@ type ProcessWatcher struct {
 	cancel      context.CancelFunc
 	mu          sync.RWMutex
 	current     map[int]DiscoveredService
-	dockerPorts map[int]bool
+	dockerPorts map[uint16]bool
 }
 
 func NewProcessWatcher(basePaths []string) (*ProcessWatcher, error) {
@@ -42,7 +42,7 @@ func NewProcessWatcher(basePaths []string) (*ProcessWatcher, error) {
 		ctx:         ctx,
 		cancel:      cancel,
 		current:     make(map[int]DiscoveredService),
-		dockerPorts: make(map[int]bool),
+		dockerPorts: make(map[uint16]bool),
 	}, nil
 }
 
@@ -50,10 +50,10 @@ func (w *ProcessWatcher) SetOnChange(fn func([]DiscoveredService)) {
 	w.onChange = fn
 }
 
-func (w *ProcessWatcher) SetDockerPorts(ports []int) {
+func (w *ProcessWatcher) SetDockerPorts(ports []uint16) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.dockerPorts = make(map[int]bool)
+	w.dockerPorts = make(map[uint16]bool)
 	for _, port := range ports {
 		w.dockerPorts[port] = true
 	}
@@ -74,9 +74,9 @@ func (w *ProcessWatcher) Start() error {
 	}
 	w.mu.Unlock()
 
-	initialTargets := make([]ScanTarget, 0, len(services))
+	initialTargets := make([]netip.AddrPort, 0, len(services))
 	for _, s := range services {
-		initialTargets = append(initialTargets, ScanTarget{IP: s.IP, Port: s.Port})
+		initialTargets = append(initialTargets, s.Endpoint)
 	}
 	if len(initialTargets) > 0 {
 		w.discoverNewServices(initialTargets)
@@ -110,13 +110,13 @@ func (w *ProcessWatcher) watchLoop() {
 
 			w.mu.Lock()
 			changed := len(services) != len(w.current)
-			var newTargets []ScanTarget
+			var newTargets []netip.AddrPort
 			if !changed {
 				for _, s := range services {
 					if s.Process == nil {
 						continue
 					}
-					if existing, ok := w.current[s.Process.PID]; !ok || existing.Port != s.Port {
+					if existing, ok := w.current[s.Process.PID]; !ok || existing.Endpoint.Port() != s.Endpoint.Port() {
 						changed = true
 						break
 					}
@@ -128,7 +128,7 @@ func (w *ProcessWatcher) watchLoop() {
 						continue
 					}
 					if _, ok := w.current[s.Process.PID]; !ok {
-						newTargets = append(newTargets, ScanTarget{IP: s.IP, Port: s.Port})
+						newTargets = append(newTargets, s.Endpoint)
 					}
 				}
 			}
@@ -158,12 +158,13 @@ func (w *ProcessWatcher) watchLoop() {
 func (w *ProcessWatcher) scan() ([]DiscoveredService, error) {
 	listeners, err := w.getListeningPorts()
 	if err != nil {
+		log.Printf("process: getListeningPorts error: %v", err)
 		return nil, err
 	}
 
 	state := &scanState{
 		ignoredDirs: map[string]bool{"apps": true, "packages": true},
-		usedPorts:   make(map[int]bool),
+		usedPorts:   make(map[uint16]bool),
 		seenPID:     make(map[int]bool),
 		cwdCache:    make(map[int]string),
 	}
@@ -177,7 +178,7 @@ func (w *ProcessWatcher) scan() ([]DiscoveredService, error) {
 
 type scanState struct {
 	ignoredDirs map[string]bool
-	usedPorts   map[int]bool
+	usedPorts   map[uint16]bool
 	seenPID     map[int]bool
 	cwdCache    map[int]string
 	results     []DiscoveredService
@@ -185,19 +186,17 @@ type scanState struct {
 
 func (w *ProcessWatcher) processEntry(state *scanState, entry portEntry) {
 	pid := entry.PID
-	port := entry.Port
-	ip := entry.IP
 
 	cwd := w.getOrCacheCWD(state, pid)
 
 	if cwd == "" {
-		w.handleUnknownCWD(state, pid, port, ip)
+		w.handleUnknownCWD(state, pid, entry.Endpoint)
 		return
 	}
 
 	basePath := w.findMatchingBasePath(cwd)
 	if basePath == "" {
-		w.handleOutsideBasePath(state, pid, port, ip)
+		w.handleOutsideBasePath(state, pid, entry.Endpoint)
 		return
 	}
 
@@ -206,8 +205,8 @@ func (w *ProcessWatcher) processEntry(state *scanState, entry portEntry) {
 		return
 	}
 
-	w.addListeningProcess(state, pid, port, ip, subdomain, cwd, needsCustomMapping)
-	state.usedPorts[port] = true
+	w.addListeningProcess(state, pid, entry.Endpoint, subdomain, cwd, needsCustomMapping)
+	state.usedPorts[entry.Endpoint.Port()] = true
 }
 
 func (w *ProcessWatcher) getOrCacheCWD(state *scanState, pid int) string {
@@ -228,15 +227,14 @@ func (w *ProcessWatcher) findMatchingBasePath(cwd string) string {
 	return ""
 }
 
-func (w *ProcessWatcher) addWellKnownProcess(state *scanState, pid int, port int, ip string) {
+func (w *ProcessWatcher) addWellKnownProcess(state *scanState, pid int, endpoint netip.AddrPort) {
+	port := endpoint.Port()
 	info, ok := WellKnownPorts[port]
 	if !ok || state.usedPorts[port] {
 		return
 	}
 	state.results = append(state.results, DiscoveredService{
 		Subdomain: info.Subdomain,
-		Port:      port,
-		IP:        ip,
 		TCPPort:   info.TCPPort,
 		Source:    RouteSourceWellKnown,
 		Process: &ProcessInfo{
@@ -248,14 +246,13 @@ func (w *ProcessWatcher) addWellKnownProcess(state *scanState, pid int, port int
 	state.usedPorts[port] = true
 }
 
-func (w *ProcessWatcher) addListeningProcess(state *scanState, pid int, port int, ip string, subdomain string, cwd string, needsCustomMapping bool) {
+func (w *ProcessWatcher) addListeningProcess(state *scanState, pid int, endpoint netip.AddrPort, subdomain string, cwd string, needsCustomMapping bool) {
 	if state.seenPID[pid] {
 		return
 	}
 	state.results = append(state.results, DiscoveredService{
 		Subdomain: subdomain,
-		Port:      port,
-		IP:        ip,
+		Endpoint:  endpoint,
 		Source:    RouteSourceProcess,
 		Process: &ProcessInfo{
 			PID:                pid,
@@ -267,12 +264,12 @@ func (w *ProcessWatcher) addListeningProcess(state *scanState, pid int, port int
 	state.seenPID[pid] = true
 }
 
-func (w *ProcessWatcher) handleUnknownCWD(state *scanState, pid int, port int, ip string) {
-	w.addWellKnownProcess(state, pid, port, ip)
+func (w *ProcessWatcher) handleUnknownCWD(state *scanState, pid int, endpoint netip.AddrPort) {
+	w.addWellKnownProcess(state, pid, endpoint)
 }
 
-func (w *ProcessWatcher) handleOutsideBasePath(state *scanState, pid int, port int, ip string) {
-	w.addWellKnownProcess(state, pid, port, ip)
+func (w *ProcessWatcher) handleOutsideBasePath(state *scanState, pid int, endpoint netip.AddrPort) {
+	w.addWellKnownProcess(state, pid, endpoint)
 }
 
 func (w *ProcessWatcher) buildSubdomain(basePath string, cwd string, ignoredDirs map[string]bool) (string, bool) {
@@ -309,13 +306,13 @@ func (w *ProcessWatcher) filterPathParts(parts []string, ignoredDirs map[string]
 	return filtered
 }
 
-func (w *ProcessWatcher) discoverNewServices(targets []ScanTarget) {
+func (w *ProcessWatcher) discoverNewServices(targets []netip.AddrPort) {
 	ctx, cancel := context.WithTimeout(w.ctx, 30*time.Second)
 
 	log.Printf("process: starting service discovery for %d targets", len(targets))
 
 	results := make(chan []ServiceInfo, 1)
-	DiscoverServices(ctx, targets, results)
+	ProbeEndpoints(ctx, targets, results)
 
 	go func() {
 		defer cancel()
@@ -332,24 +329,24 @@ func (w *ProcessWatcher) discoverNewServices(targets []ScanTarget) {
 
 		log.Printf("process: discovered %d services", len(services))
 		for _, s := range services {
-			log.Printf("process: discovered service %s:%d protocol=%s", s.IP, s.Port, s.Protocol)
+			log.Printf("process: discovered service %s protocol=%s", s.Endpoint.String(), s.Protocol)
 		}
 
 		type serviceKey struct {
 			IP   string
 			Port int
 		}
-		serviceByKey := make(map[serviceKey]*ServiceInfo)
-		for i := range services {
-			key := serviceKey{IP: services[i].IP, Port: services[i].Port}
+		serviceByKey := make(map[netip.AddrPort]*ServiceInfo)
+		for i, svc := range services {
+			key := svc.Endpoint
 			serviceByKey[key] = &services[i]
 		}
 
 		w.mu.Lock()
 		updated := false
 		for pid, svc := range w.current {
-			key := serviceKey{IP: svc.IP, Port: svc.Port}
-			if info, ok := serviceByKey[key]; ok {
+			key := svc
+			if info, ok := serviceByKey[key.Endpoint]; ok {
 				log.Printf("process: assigning ServiceInfo to %s (pid %d): protocol=%s", svc.Subdomain, pid, info.Protocol)
 				svc.Service = info
 				w.current[pid] = svc

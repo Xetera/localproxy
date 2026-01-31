@@ -10,7 +10,7 @@ const (
 )
 
 type WellKnownPort struct {
-	Port      int
+	Port      uint16
 	Subdomain string
 	Protocol  PortProtocol
 	TCPPort   int
@@ -38,7 +38,7 @@ type WellKnownPortInfo struct {
 	TCPPort   int
 }
 
-var WellKnownPorts = map[int]WellKnownPortInfo{
+var WellKnownPorts = map[uint16]WellKnownPortInfo{
 	8384:  {"syncthing", ProtocolHTTP, 0},
 	5432:  {"postgres", ProtocolTCP, 15432},
 	6379:  {"redis", ProtocolTCP, 16379},

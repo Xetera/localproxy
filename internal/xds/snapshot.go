@@ -191,7 +191,7 @@ func (b *SnapshotBuilder) Build(routes []Route, httpsRedirect bool) (*cache.Snap
 				},
 			},
 			{
-				Filter: statusCode503Filter,
+				Filter:     statusCode503Filter,
 				StatusCode: wrapperspb.UInt32(503),
 				Body: &core.DataSource{
 					Specifier: &core.DataSource_InlineString{InlineString: error503HTML},

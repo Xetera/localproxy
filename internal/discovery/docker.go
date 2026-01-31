@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/netip"
 	"strconv"
 	"strings"
 	"time"
@@ -143,19 +144,21 @@ func (w *DockerWatcher) parseContainer(c container.Summary) (*DiscoveredService,
 		ip = "127.0.0.1"
 	}
 
-	var allPorts []DockerPort
+	var allPorts []DockerListener
 	for _, p := range c.Ports {
-		dp := DockerPort{
+		dp := DockerListener{
 			PrivatePort: int(p.PrivatePort),
 			Type:        p.Type,
 		}
+		var portValue uint16
 		if p.PublicPort > 0 {
-			dp.Port = int(p.PublicPort)
-			dp.IP = "127.0.0.1"
+			portValue = p.PublicPort
 		} else {
-			dp.Port = int(p.PrivatePort)
-			dp.IP = ip
+			portValue = p.PrivatePort
 		}
+		endpoint, _ := netip.ParseAddrPort(fmt.Sprintf("%s:%d", ip, portValue))
+		dp.Endpoint = endpoint
+		log.Println(dp.Endpoint)
 		allPorts = append(allPorts, dp)
 	}
 
@@ -185,10 +188,16 @@ func (w *DockerWatcher) parseContainer(c container.Summary) (*DiscoveredService,
 		return nil, "no exposed ports"
 	}
 
+	rawEndpoint := fmt.Sprintf("%s:%d", ip, port)
+	endpoint, error := netip.ParseAddrPort(rawEndpoint)
+	if error != nil {
+		fmt.Printf("Invalid endpoint %s\n", rawEndpoint)
+		log.Fatal(error)
+	}
+
 	return &DiscoveredService{
 		Subdomain: subdomain,
-		Port:      port,
-		IP:        ip,
+		Endpoint:  endpoint,
 		TCPPort:   tcpPort,
 		Source:    RouteSourceDocker,
 		Docker: &DockerInfo{
@@ -309,15 +318,16 @@ func (w *DockerWatcher) DiscoverServiceInfo(svc DiscoveredService, onDiscovered 
 		return
 	}
 
-	var targets []ScanTarget
-	portToIndex := make(map[int][]int)
+	var targets []netip.AddrPort
+	portToIndex := make(map[uint16][]int)
 
 	for i, dp := range svc.Docker.Ports {
 		if dp.Type != "tcp" {
 			continue
 		}
-		targets = append(targets, ScanTarget{IP: dp.IP, Port: dp.Port})
-		portToIndex[dp.Port] = append(portToIndex[dp.Port], i)
+		port := dp.Endpoint.Port()
+		targets = append(targets, dp.Endpoint)
+		portToIndex[port] = append(portToIndex[port], i)
 	}
 
 	if len(targets) == 0 {
@@ -326,57 +336,61 @@ func (w *DockerWatcher) DiscoverServiceInfo(svc DiscoveredService, onDiscovered 
 
 	log.Printf("docker: starting service discovery for %s on %d ports", svc.Subdomain, len(targets))
 	results := make(chan []ServiceInfo, 1)
-	DiscoverServices(w.ctx, targets, results)
+	ProbeEndpoints(w.ctx, targets, results)
+	onDiscovered(svc)
 
-	go func() {
-		services, ok := <-results
-		if !ok {
-			log.Printf("docker: service discovery channel closed for %s", svc.Subdomain)
-			return
-		}
-		if len(services) == 0 {
-			log.Printf("docker: no services discovered for %s", svc.Subdomain)
-			return
-		}
-
-		for _, s := range services {
-			if indices, ok := portToIndex[s.Port]; ok {
-				for _, idx := range indices {
-					svc.Docker.Ports[idx].ServiceProtocol = s.Protocol
-				}
-			}
-			if s.Port == svc.Port {
-				svc.Service = &s
-			}
-		}
-
-		if svc.Service == nil && len(services) > 0 {
-			svc.Service = &services[0]
-		}
-
-		log.Printf("docker: before port selection for %s: port=%d, service=%v", svc.Subdomain, svc.Port, svc.Service)
-		derivedPort := w.derivePorts(&svc, services)
-		if derivedPort == 0 {
-			log.Printf("docker: no port derived for %s, continuing to use %d", svc.Subdomain, svc.Port)
-		} else {
-			log.Printf("docker: after port selection for %s: port=%d, service=%v", svc.Subdomain, svc.Port, svc.Service)
-		}
-		log.Printf("docker: discovered %d services for %s", len(services), svc.Subdomain)
-		onDiscovered(svc)
-	}()
+	go w.onServiceDiscovered(svc, results, portToIndex, onDiscovered)
 }
 
-func (*DockerWatcher) derivePorts(svc *DiscoveredService, services []ServiceInfo) int {
-	port := 0
+func (w *DockerWatcher) onServiceDiscovered(svc DiscoveredService, results chan []ServiceInfo, portToIndex map[uint16][]int, onDiscovered func(DiscoveredService)) {
+	services, ok := <-results
+	if !ok {
+		log.Printf("docker: service discovery channel closed for %s", svc.Subdomain)
+		return
+	}
+	if len(services) == 0 {
+		log.Printf("docker: no services discovered for %s", svc.Subdomain)
+		return
+	}
+
+	for _, s := range services {
+		port := s.Endpoint.Port()
+		if indices, ok := portToIndex[port]; ok {
+			for _, idx := range indices {
+				svc.Docker.Ports[idx].ServiceProtocol = s.Protocol
+			}
+		}
+		if s.Endpoint.Port() == svc.Endpoint.Port() {
+			svc.Service = &s
+		}
+	}
+
+	if svc.Service == nil && len(services) > 0 {
+		svc.Service = &services[0]
+	}
+
+	log.Printf("docker: before port selection for %s: port=%d, service=%v", svc.Subdomain, svc.Endpoint.Port(), svc.Service)
+	derivedPort := w.derivePorts(&svc, services)
+	if derivedPort == 0 {
+		log.Printf("docker: no port derived for %s, continuing to use %d", svc.Subdomain, svc.Endpoint.Port())
+	} else {
+		log.Printf("docker: after port selection for %s: port=%d, service=%v", svc.Subdomain, svc.Endpoint.Port(), svc.Service)
+	}
+	log.Printf("docker: discovered %d services for %s", len(services), svc.Subdomain)
+	onDiscovered(svc)
+}
+
+func (*DockerWatcher) derivePorts(svc *DiscoveredService, services []ServiceInfo) uint16 {
+	var port uint16
 
 	if len(svc.Docker.Ports) > 1 {
 		for _, s := range services {
 			if s.Protocol == "http" || s.Protocol == "https" {
-				oldPort := svc.Port
-				svc.Port = s.Port
+				oldPort := svc.Endpoint
+				svc.Endpoint = s.Endpoint
 				svc.Service = &s
-				log.Printf("docker: using HTTP port %d instead of %d for %s", s.Port, oldPort, svc.Subdomain)
-				port = svc.Port
+				log.Printf("docker: using HTTP %s instead of %d for %s", s.Endpoint.String(), oldPort, svc.Subdomain)
+				port = svc.Endpoint.Port()
 				break
 			}
 		}

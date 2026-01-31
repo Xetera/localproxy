@@ -3,6 +3,7 @@ package registry
 import (
 	"fmt"
 	"log"
+	"net/netip"
 	"sync"
 
 	"github.com/xetera/localproxy/internal/discovery"
@@ -49,7 +50,7 @@ func (r *RouteRegistry) UpdateServices(source discovery.RouteSource, services []
 
 		svc.Subdomain = subdomain
 		r.services[subdomain] = svc
-		log.Printf("registry: %s route %s -> %s:%d protocol=%s", svc.Source, subdomain, svc.IP, svc.Port, func() string {
+		log.Printf("registry: %s route %s -> %s protocol=%s", svc.Source, subdomain, svc.Endpoint.String(), func() string {
 			if svc.Service != nil {
 				return svc.Service.Protocol
 			}
@@ -81,10 +82,10 @@ func (r *RouteRegistry) GetRoutes() []proxy.Route {
 
 func (r *RouteRegistry) getRoutesLocked() []proxy.Route {
 	var routes []proxy.Route
+	endpoint := netip.AddrPortFrom(netip.AddrFrom4([4]byte{127, 0, 0, 1}), proxy.ServerPort)
 	routes = append(routes, proxy.Route{
 		Subdomain: "",
-		Host:      "127.0.0.1",
-		Port:      proxy.ServerPort,
+		Endpoint:  endpoint,
 		PID:       0,
 		Source:    discovery.RouteSourceWellKnown,
 	})
@@ -92,8 +93,7 @@ func (r *RouteRegistry) getRoutesLocked() []proxy.Route {
 	for _, svc := range r.services {
 		route := proxy.Route{
 			Subdomain: svc.Subdomain,
-			Host:      svc.IP,
-			Port:      svc.Port,
+			Endpoint:  svc.Endpoint,
 			TCPPort:   svc.TCPPort,
 			Source:    svc.Source,
 		}
@@ -140,7 +140,7 @@ func (r *RouteRegistry) UpdateService(svc discovery.DiscoveredService) {
 	}
 
 	r.services[subdomain] = svc
-	log.Printf("registry: %s route %s -> %s:%d protocol=%s", svc.Source, subdomain, svc.IP, svc.Port, func() string {
+	log.Printf("registry: %s route %s -> %s protocol=%s", svc.Source, subdomain, svc.Endpoint, func() string {
 		if svc.Service != nil {
 			return svc.Service.Protocol
 		}

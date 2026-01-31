@@ -1,5 +1,7 @@
 package discovery
 
+import "net/netip"
+
 type RouteSource string
 
 const (
@@ -10,8 +12,7 @@ const (
 
 type DiscoveredService struct {
 	Subdomain string
-	Port      int
-	IP        string
+	Endpoint  netip.AddrPort
 	TCPPort   int
 	Source    RouteSource
 
@@ -30,11 +31,13 @@ type ProcessInfo struct {
 	IsDocker           bool
 }
 
-type DockerPort struct {
-	Port            int
-	PrivatePort     int
-	IP              string
-	Type            string
+type DockerListener struct {
+	Endpoint    netip.AddrPort
+	PrivatePort int
+	Type        string
+	/**
+	 * tcp/udp/http/postgres etc
+	 */
 	ServiceProtocol string
 }
 
@@ -42,7 +45,7 @@ type DockerInfo struct {
 	ID            string
 	Name          string
 	HasCustomName bool
-	Ports         []DockerPort
+	Ports         []DockerListener
 }
 
 type FolderInfo struct {

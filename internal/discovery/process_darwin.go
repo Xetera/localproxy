@@ -24,6 +24,7 @@ import "C"
 
 import (
 	"bufio"
+	"net/netip"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -82,11 +83,13 @@ func (w *ProcessWatcher) getListeningPorts() ([]portEntry, error) {
 		ipStr := addr[:colonIdx]
 		if ipStr == "*" {
 			ipStr = "127.0.0.1"
-		} else if strings.HasPrefix(ipStr, "[") && strings.HasSuffix(ipStr, "]") {
-			ipStr = ipStr[1 : len(ipStr)-1]
 		}
 
-		result = append(result, portEntry{PID: pid, Port: port, IP: ipStr})
+		addr, err := netip.ParseAddr(ipStr)
+		if err != nil {
+			continue
+		}
+		result = append(result, portEntry{PID: pid, Endpoint: netip.AddrPortFrom(addr, uint16(port))})
 	}
 
 	return result, nil

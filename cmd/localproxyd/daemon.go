@@ -263,8 +263,8 @@ func (d *Daemon) onRoutesChanged(routes []proxy.Route) {
 
 		xdsRoute := xds.Route{
 			Subdomain: r.Subdomain,
-			Host:      r.Host,
-			Port:      r.Port,
+			Host:      r.Endpoint.Addr().String(),
+			Port:      int(r.Endpoint.Port()),
 			TCPPort:   r.TCPPort,
 			Protocol:  xds.ProtocolHTTP,
 			CertPath:  certPath,
@@ -323,9 +323,9 @@ func (d *Daemon) onDockerChanged(services []discovery.DiscoveredService) {
 	}
 
 	if d.processWatcher != nil {
-		ports := make([]int, 0, len(services))
+		ports := make([]uint16, 0, len(services))
 		for _, s := range services {
-			ports = append(ports, s.Port)
+			ports = append(ports, s.Endpoint.Port())
 		}
 		d.processWatcher.SetDockerPorts(ports)
 	}

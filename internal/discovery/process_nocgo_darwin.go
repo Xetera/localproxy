@@ -4,6 +4,8 @@ package discovery
 
 import (
 	"bufio"
+	"fmt"
+	"net/netip"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -61,11 +63,13 @@ func (w *ProcessWatcher) getListeningPorts() ([]portEntry, error) {
 		ipStr := addr[:colonIdx]
 		if ipStr == "*" {
 			ipStr = "127.0.0.1"
-		} else if strings.HasPrefix(ipStr, "[") && strings.HasSuffix(ipStr, "]") {
-			ipStr = ipStr[1 : len(ipStr)-1]
 		}
 
-		result = append(result, portEntry{PID: pid, Port: port, IP: ipStr})
+		endpoint, err := netip.ParseAddrPort(ipStr + ":" + portStr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse endpoint: %w", err)
+		}
+		result = append(result, portEntry{PID: pid, Endpoint: endpoint})
 	}
 
 	return result, nil

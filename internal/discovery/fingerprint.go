@@ -5,40 +5,24 @@ import (
 	"fmt"
 	"log"
 	"net/netip"
-	"strings"
 	"time"
 
 	"github.com/praetorian-inc/fingerprintx/pkg/plugins"
 	scan "github.com/praetorian-inc/fingerprintx/pkg/scan"
 )
 
-type ScanTarget struct {
-	IP   string
-	Port int
-}
-
 type ServiceInfo struct {
-	IP       string
-	Port     int
+	Endpoint netip.AddrPort
 	Protocol string
-	Name     string
-	Product  string
 	Version  string
 }
 
-func DiscoverServices(ctx context.Context, targets []ScanTarget, results chan<- []ServiceInfo) {
+func ProbeEndpoints(ctx context.Context, addrs []netip.AddrPort, results chan<- []ServiceInfo) {
 	go func() {
 		defer close(results)
 
 		t := make([]plugins.Target, 0)
-		for _, a := range targets {
-			ip, err := netip.ParseAddr(strings.TrimSpace(a.IP))
-			if err != nil {
-				fmt.Println(err)
-				continue
-			}
-			port := uint16(a.Port)
-			address := netip.AddrPortFrom(ip, port)
+		for _, address := range addrs {
 			t = append(t, plugins.Target{
 				Address: address,
 				Host:    "",
@@ -64,6 +48,7 @@ func DiscoverServices(ctx context.Context, targets []ScanTarget, results chan<- 
 			for _, target := range t {
 				log.Printf("	Scanning target %s\n", target.Address.String())
 			}
+			fmt.Println(t)
 			scanned, err := scan.ScanTargets(t, scan.Config{
 				UDP:            false,
 				FastMode:       false,
@@ -76,23 +61,31 @@ func DiscoverServices(ctx context.Context, targets []ScanTarget, results chan<- 
 			}
 
 			log.Printf("fingerprint: scan returned %d results\n", len(scanned))
-			if len(scanned) > 0 {
-				var services []ServiceInfo
-				for _, s := range scanned {
-					log.Printf("	%s:%d (%s)\n", s.IP, s.Port, s.Protocol)
-					services = append(services, ServiceInfo{
-						IP:       s.IP,
-						Port:     s.Port,
-						Protocol: s.Protocol,
-						Version:  s.Version,
-					})
-				}
-				select {
-				case results <- services:
-				case <-ctx.Done():
-				}
+			var services []ServiceInfo
+			if len(scanned) == 0 {
+				results <- services
 				return
 			}
+
+			for _, s := range scanned {
+				log.Printf("	%s:%d (%s)\n", s.IP, s.Port, s.Protocol)
+				addr, err := netip.ParseAddr(s.IP)
+				if err != nil {
+					log.Printf("fingerprint: failed to parse IP %s: %v\n", s.IP, err)
+					continue
+				}
+				endpoint := netip.AddrPortFrom(addr, uint16(s.Port))
+				services = append(services, ServiceInfo{
+					Endpoint: endpoint,
+					Protocol: s.Protocol,
+					Version:  s.Version,
+				})
+			}
+			select {
+			case results <- services:
+			case <-ctx.Done():
+			}
+			return
 		}
 	}()
 }

@@ -5,6 +5,7 @@ package discovery
 import (
 	"bufio"
 	"fmt"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -110,7 +111,11 @@ func (w *ProcessWatcher) parseProcNet(path string) ([]portEntry, error) {
 			continue
 		}
 
-		result = append(result, portEntry{PID: pid, Port: port, IP: ipStr})
+		addr, err := netip.ParseAddr(ipStr)
+		if err != nil {
+			continue
+		}
+		result = append(result, portEntry{PID: pid, Endpoint: netip.AddrPortFrom(addr, uint16(port))})
 	}
 
 	return result, nil
