@@ -1,10 +1,12 @@
 package xds
 
 import (
+	_ "embed"
 	"fmt"
 	"net"
 	"time"
 
+	accesslog "github.com/envoyproxy/go-control-plane/envoy/config/accesslog/v3"
 	cluster "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
 	core "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	endpoint "github.com/envoyproxy/go-control-plane/envoy/config/endpoint/v3"
@@ -21,7 +23,14 @@ import (
 	"github.com/envoyproxy/go-control-plane/pkg/resource/v3"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
+
+//go:embed 503.html
+var error503HTML string
+
+//go:embed 503-dashboard.html
+var error503DashboardHTML string
 
 type Protocol string
 
@@ -89,12 +98,112 @@ func (b *SnapshotBuilder) Build(routes []Route, httpsRedirect bool) (*cache.Snap
 
 	routerFilter, _ := anypb.New(&router.Router{})
 
+	statusCode503Filter := &accesslog.AccessLogFilter{
+		FilterSpecifier: &accesslog.AccessLogFilter_StatusCodeFilter{
+			StatusCodeFilter: &accesslog.StatusCodeFilter{
+				Comparison: &accesslog.ComparisonFilter{
+					Op: accesslog.ComparisonFilter_EQ,
+					Value: &core.RuntimeUInt32{
+						DefaultValue: 503,
+						RuntimeKey:   "local_reply_503",
+					},
+				},
+			},
+		},
+	}
+
+	dashboardHostFilter := &accesslog.AccessLogFilter{
+		FilterSpecifier: &accesslog.AccessLogFilter_OrFilter{
+			OrFilter: &accesslog.OrFilter{
+				Filters: []*accesslog.AccessLogFilter{
+					{
+						FilterSpecifier: &accesslog.AccessLogFilter_HeaderFilter{
+							HeaderFilter: &accesslog.HeaderFilter{
+								Header: &route.HeaderMatcher{
+									Name: ":authority",
+									HeaderMatchSpecifier: &route.HeaderMatcher_ExactMatch{
+										ExactMatch: "localhost",
+									},
+								},
+							},
+						},
+					},
+					{
+						FilterSpecifier: &accesslog.AccessLogFilter_HeaderFilter{
+							HeaderFilter: &accesslog.HeaderFilter{
+								Header: &route.HeaderMatcher{
+									Name: ":authority",
+									HeaderMatchSpecifier: &route.HeaderMatcher_ExactMatch{
+										ExactMatch: "proxy.localhost",
+									},
+								},
+							},
+						},
+					},
+					{
+						FilterSpecifier: &accesslog.AccessLogFilter_HeaderFilter{
+							HeaderFilter: &accesslog.HeaderFilter{
+								Header: &route.HeaderMatcher{
+									Name: ":authority",
+									HeaderMatchSpecifier: &route.HeaderMatcher_ExactMatch{
+										ExactMatch: "proxy.internal",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	localReplyConfig := &hcm.LocalReplyConfig{
+		Mappers: []*hcm.ResponseMapper{
+			{
+				Filter: &accesslog.AccessLogFilter{
+					FilterSpecifier: &accesslog.AccessLogFilter_AndFilter{
+						AndFilter: &accesslog.AndFilter{
+							Filters: []*accesslog.AccessLogFilter{
+								statusCode503Filter,
+								dashboardHostFilter,
+							},
+						},
+					},
+				},
+				StatusCode: wrapperspb.UInt32(503),
+				Body: &core.DataSource{
+					Specifier: &core.DataSource_InlineString{InlineString: error503DashboardHTML},
+				},
+				BodyFormatOverride: &core.SubstitutionFormatString{
+					ContentType: "text/html; charset=UTF-8",
+					Format: &core.SubstitutionFormatString_TextFormat{
+						TextFormat: "%LOCAL_REPLY_BODY%",
+					},
+				},
+			},
+			{
+				Filter: statusCode503Filter,
+				StatusCode: wrapperspb.UInt32(503),
+				Body: &core.DataSource{
+					Specifier: &core.DataSource_InlineString{InlineString: error503HTML},
+				},
+				BodyFormatOverride: &core.SubstitutionFormatString{
+					ContentType: "text/html; charset=UTF-8",
+					Format: &core.SubstitutionFormatString_TextFormat{
+						TextFormat: "%LOCAL_REPLY_BODY%",
+					},
+				},
+			},
+		},
+	}
+
 	httpsHcm := &hcm.HttpConnectionManager{
 		CodecType:             hcm.HttpConnectionManager_AUTO,
 		StatPrefix:            "https_ingress",
 		StreamIdleTimeout:     durationpb.New(0),
 		RequestTimeout:        durationpb.New(0),
 		RequestHeadersTimeout: durationpb.New(0),
+		LocalReplyConfig:      localReplyConfig,
 		RouteSpecifier: &hcm.HttpConnectionManager_Rds{
 			Rds: &hcm.Rds{
 				ConfigSource: &core.ConfigSource{
@@ -119,6 +228,7 @@ func (b *SnapshotBuilder) Build(routes []Route, httpsRedirect bool) (*cache.Snap
 		StreamIdleTimeout:     durationpb.New(0),
 		RequestTimeout:        durationpb.New(0),
 		RequestHeadersTimeout: durationpb.New(0),
+		LocalReplyConfig:      localReplyConfig,
 		RouteSpecifier: &hcm.HttpConnectionManager_Rds{
 			Rds: &hcm.Rds{
 				ConfigSource: &core.ConfigSource{
@@ -387,6 +497,7 @@ func (b *SnapshotBuilder) Build(routes []Route, httpsRedirect bool) (*cache.Snap
 				StreamIdleTimeout:     durationpb.New(0),
 				RequestTimeout:        durationpb.New(0),
 				RequestHeadersTimeout: durationpb.New(0),
+				LocalReplyConfig:      localReplyConfig,
 				RouteSpecifier: &hcm.HttpConnectionManager_Rds{
 					Rds: &hcm.Rds{
 						ConfigSource: &core.ConfigSource{
