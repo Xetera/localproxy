@@ -6,7 +6,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/deckarep/gosx-notifier"
+	gosxnotifier "github.com/deckarep/gosx-notifier"
 	"github.com/gen2brain/beeep"
 )
 

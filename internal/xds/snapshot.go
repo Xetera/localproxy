@@ -132,7 +132,7 @@ func (b *SnapshotBuilder) Build(routes []Route, certPath, keyPath string, httpsR
 			clusterName = "cluster_root"
 			sniDomains = []string{"proxy.localhost", "proxy.internal"}
 		} else {
-			clusterName = fmt.Sprintf("cluster_%s", r.Subdomain)
+			clusterName = r.Subdomain
 			sniDomains = []string{
 				fmt.Sprintf("%s.proxy.localhost", r.Subdomain),
 				fmt.Sprintf("%s.proxy.internal", r.Subdomain),

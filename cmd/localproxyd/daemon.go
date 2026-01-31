@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/xetera/localproxy/internal/certs"
 	"github.com/xetera/localproxy/internal/discovery"
@@ -35,6 +36,7 @@ type Daemon struct {
 	certMgr         *certs.CertManager
 	xdsServer       *xds.Server
 	envoyMgr        *envoy.Manager
+	statsScraper    *envoy.StatsScraper
 	routeRegistry   *registry.RouteRegistry
 	dashboardServer *proxy.DashboardServer
 	processWatcher  *discovery.ProcessWatcher
@@ -108,6 +110,12 @@ func (d *Daemon) Start() error {
 }
 
 func (d *Daemon) Stop() {
+	if d.statsScraper != nil {
+		d.statsScraper.Stop()
+	}
+	if d.envoyMgr != nil {
+		d.envoyMgr.Stop()
+	}
 	if d.logFile != nil {
 		d.logFile.Close()
 	}
@@ -153,7 +161,12 @@ func (d *Daemon) initXDS() error {
 
 func (d *Daemon) initEnvoy() error {
 	d.envoyMgr = envoy.NewManager(d.dataDir, "127.0.0.1:18000", d.xdsServer.NodeID(), d.config.LogLevel)
-	return d.envoyMgr.Start()
+	if err := d.envoyMgr.Start(); err != nil {
+		return err
+	}
+	d.statsScraper = envoy.NewStatsScraper("http://127.0.0.1:9901", "", 10*time.Second)
+	d.statsScraper.Start()
+	return nil
 }
 
 func (d *Daemon) initRouting() error {
