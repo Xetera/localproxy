@@ -551,17 +551,62 @@
             </a>
             <div class="metrics-grid">
               <div class="metric-card">
-                <div class="metric-label">Packets / Bytes</div>
+                <div class="metric-label">Traffic</div>
                 <div class="metric-value">
-                  <span>0</span>
+                  <span>{{.SelectedStats.RxFormatted}}</span>
                   <span class="metric-unit">rx</span>
-                  <span style="margin-left: 1rem">0</span>
+                  <span style="margin-left: 1rem">{{.SelectedStats.TxFormatted}}</span>
                   <span class="metric-unit">tx</span>
                 </div>
               </div>
               <div class="metric-card">
-                <div class="metric-label">Uptime</div>
-                <div class="metric-value">-</div>
+                <div class="metric-label">Traffic Rate</div>
+                <div class="metric-value">
+                  <span>{{.SelectedStats.RxRateFormatted}}</span>
+                  <span class="metric-unit">/s rx</span>
+                  <span style="margin-left: 1rem">{{.SelectedStats.TxRateFormatted}}</span>
+                  <span class="metric-unit">/s tx</span>
+                </div>
+              </div>
+              <div class="metric-card">
+                <div class="metric-label">HTTP Requests</div>
+                <div class="metric-value">
+                  <span>{{.SelectedStats.RequestsFormatted}}</span>
+                  <span class="metric-unit">total</span>
+                  <span style="margin-left: 1rem">{{.SelectedStats.RequestsRateFormatted}}</span>
+                  <span class="metric-unit">/s</span>
+                </div>
+              </div>
+              <div class="metric-card">
+                <div class="metric-label">Response Codes</div>
+                <div class="metric-value" style="font-size: 1rem">
+                  <span style="color: #22c55e">{{.SelectedStats.HTTP2xxFormatted}}</span>
+                  <span class="metric-unit">2xx</span>
+                  <span style="margin-left: 0.5rem; color: #f59e0b">{{.SelectedStats.HTTP4xxFormatted}}</span>
+                  <span class="metric-unit">4xx</span>
+                  <span style="margin-left: 0.5rem; color: #ef4444">{{.SelectedStats.HTTP5xxFormatted}}</span>
+                  <span class="metric-unit">5xx</span>
+                </div>
+              </div>
+              <div class="metric-card">
+                <div class="metric-label">Protocol</div>
+                <div class="metric-value" style="font-size: 1rem">
+                  <span>{{.SelectedStats.HTTP1Formatted}}</span>
+                  <span class="metric-unit">H1</span>
+                  <span style="margin-left: 0.5rem">{{.SelectedStats.HTTP2Formatted}}</span>
+                  <span class="metric-unit">H2</span>
+                  <span style="margin-left: 0.5rem">{{.SelectedStats.HTTP3Formatted}}</span>
+                  <span class="metric-unit">H3</span>
+                </div>
+              </div>
+              <div class="metric-card">
+                <div class="metric-label">Connections</div>
+                <div class="metric-value" style="font-size: 1rem">
+                  <span>{{.SelectedStats.ActiveConnections}}</span>
+                  <span class="metric-unit">active</span>
+                  <span style="margin-left: 0.5rem">{{.SelectedStats.DisconnectsFormatted}}</span>
+                  <span class="metric-unit">disconnects</span>
+                </div>
               </div>
             </div>
             <div class="info-grid">

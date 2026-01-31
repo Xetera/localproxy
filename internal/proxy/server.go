@@ -18,6 +18,7 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/xetera/localproxy/internal/discovery"
+	"github.com/xetera/localproxy/internal/envoy"
 )
 
 const (
@@ -62,19 +63,22 @@ type DashboardServer struct {
 	logManager         *LogManager
 	basePaths          []string
 	unroutedContainers []UnroutedContainer
+	statsScraper       *envoy.StatsScraper
 }
 
-func NewDashboardServer(basePaths []string, traceProcessLogs bool) *DashboardServer {
+func NewDashboardServer(basePaths []string, traceProcessLogs bool, statsScraper *envoy.StatsScraper) *DashboardServer {
 	s := &DashboardServer{
-		routes:     make(map[string]Route),
-		logManager: NewLogManager(traceProcessLogs),
-		basePaths:  basePaths,
+		routes:       make(map[string]Route),
+		logManager:   NewLogManager(traceProcessLogs),
+		basePaths:    basePaths,
+		statsScraper: statsScraper,
 	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleRoot)
 	mux.HandleFunc("/logs", s.serveLogs)
 	mux.HandleFunc("/api/logs-preview", s.serveLogsPreview)
+	mux.HandleFunc("/api/stats", s.serveStats)
 
 	s.server = &http.Server{
 		Addr:         fmt.Sprintf("127.0.0.1:%d", ServerPort),
@@ -171,6 +175,55 @@ type ProcessGroup struct {
 	Cwd        string
 	DisplayCwd string
 	Routes     []RouteWithLogs
+}
+
+type FormattedStats struct {
+	RxFormatted           string
+	TxFormatted           string
+	RxRateFormatted       string
+	TxRateFormatted       string
+	RequestsFormatted     string
+	RequestsRateFormatted string
+	HTTP2xxFormatted      string
+	HTTP4xxFormatted      string
+	HTTP5xxFormatted      string
+	HTTP1Formatted        string
+	HTTP2Formatted        string
+	HTTP3Formatted        string
+	ActiveConnections     uint64
+	DisconnectsFormatted  string
+}
+
+func formatBytes(bytes uint64) string {
+	if bytes == 0 {
+		return "0"
+	}
+	const k = 1024
+	sizes := []string{"B", "KB", "MB", "GB"}
+	i := 0
+	b := float64(bytes)
+	for b >= k && i < len(sizes)-1 {
+		b /= k
+		i++
+	}
+	if i == 0 {
+		return fmt.Sprintf("%d%s", bytes, sizes[i])
+	}
+	return fmt.Sprintf("%.1f%s", b, sizes[i])
+}
+
+func formatNumber(n uint64) string {
+	if n >= 1000000 {
+		return fmt.Sprintf("%.1fM", float64(n)/1000000)
+	}
+	if n >= 1000 {
+		return fmt.Sprintf("%.1fK", float64(n)/1000)
+	}
+	return fmt.Sprintf("%d", n)
+}
+
+func formatRate(r float64) string {
+	return formatBytes(uint64(r))
 }
 
 func trimBasePath(cwd string, basePaths []string) string {
@@ -375,6 +428,49 @@ func (s *DashboardServer) serveDashboard(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	selectedStats := FormattedStats{
+		RxFormatted:           "0",
+		TxFormatted:           "0",
+		RxRateFormatted:       "0",
+		TxRateFormatted:       "0",
+		RequestsFormatted:     "0",
+		RequestsRateFormatted: "0.0",
+		HTTP2xxFormatted:      "0",
+		HTTP4xxFormatted:      "0",
+		HTTP5xxFormatted:      "0",
+		HTTP1Formatted:        "0",
+		HTTP2Formatted:        "0",
+		HTTP3Formatted:        "0",
+		ActiveConnections:     0,
+		DisconnectsFormatted:  "0",
+	}
+	if selectedRoute != nil && s.statsScraper != nil {
+		clusterName := selectedRoute.Subdomain
+		if clusterName == "" {
+			clusterName = "cluster_root"
+		}
+		allStats := s.statsScraper.GetClusterStats()
+		globalStats := s.statsScraper.GetGlobalStats()
+		if stats, ok := allStats[clusterName]; ok {
+			selectedStats = FormattedStats{
+				RxFormatted:           formatBytes(stats.TCPBytesReceived),
+				TxFormatted:           formatBytes(stats.TCPBytesSent),
+				RxRateFormatted:       formatRate(stats.TCPBytesReceivedRate),
+				TxRateFormatted:       formatRate(stats.TCPBytesSentRate),
+				RequestsFormatted:     formatNumber(stats.HTTPRequestsTotal),
+				RequestsRateFormatted: fmt.Sprintf("%.1f", stats.HTTPRequestsRate),
+				HTTP2xxFormatted:      formatNumber(stats.HTTP2xx),
+				HTTP4xxFormatted:      formatNumber(stats.HTTP4xx),
+				HTTP5xxFormatted:      formatNumber(stats.HTTP5xx),
+				HTTP1Formatted:        formatNumber(globalStats.DownstreamHTTP1),
+				HTTP2Formatted:        formatNumber(globalStats.DownstreamHTTP2),
+				HTTP3Formatted:        formatNumber(globalStats.DownstreamHTTP3),
+				ActiveConnections:     stats.ActiveConnections,
+				DisconnectsFormatted:  formatNumber(stats.DisconnectsLocal + stats.DisconnectsRemote),
+			}
+		}
+	}
+
 	templatesPath := getTemplatesPath()
 	funcMap := template.FuncMap{
 		"add": func(a, b int) int { return a + b },
@@ -399,6 +495,7 @@ func (s *DashboardServer) serveDashboard(w http.ResponseWriter, r *http.Request)
 		"SelectedRoute":      selectedRoute,
 		"SelectedLogs":       selectedLogs,
 		"SelectedPorts":      portRepr,
+		"SelectedStats":      selectedStats,
 	})
 }
 
@@ -528,4 +625,16 @@ func (s *DashboardServer) streamLogs(w http.ResponseWriter, r *http.Request, sub
 	if err := scanner.Err(); err != nil {
 		log.Printf("log stream error: %v", err)
 	}
+}
+
+func (s *DashboardServer) serveStats(w http.ResponseWriter, r *http.Request) {
+	if s.statsScraper == nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte("{}"))
+		return
+	}
+
+	stats := s.statsScraper.GetClusterStats()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
 }

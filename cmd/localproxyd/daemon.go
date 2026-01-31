@@ -158,14 +158,14 @@ func (d *Daemon) initEnvoy() error {
 	if err := d.envoyMgr.Start(); err != nil {
 		return err
 	}
-	d.statsScraper = envoy.NewStatsScraper("http://127.0.0.1:9901", "", 10*time.Second)
+	d.statsScraper = envoy.NewStatsScraper("http://127.0.0.1:9901", 10*time.Second)
 	d.statsScraper.Start()
 	return nil
 }
 
 func (d *Daemon) initRouting() error {
 	basePaths := d.getBasePaths()
-	d.dashboardServer = proxy.NewDashboardServer(basePaths, d.config.TraceProcessLogs)
+	d.dashboardServer = proxy.NewDashboardServer(basePaths, d.config.TraceProcessLogs, d.statsScraper)
 	d.routeRegistry = registry.NewRouteRegistry(d.onRoutesChanged)
 
 	certPath, keyPath, _ := d.certMgr.GetCert("localhost")
