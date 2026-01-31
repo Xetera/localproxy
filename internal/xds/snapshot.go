@@ -18,6 +18,7 @@ import (
 	tcpproxy "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/tcp_proxy/v3"
 	quic "github.com/envoyproxy/go-control-plane/envoy/extensions/transport_sockets/quic/v3"
 	tls "github.com/envoyproxy/go-control-plane/envoy/extensions/transport_sockets/tls/v3"
+	matcher "github.com/envoyproxy/go-control-plane/envoy/type/matcher/v3"
 	"github.com/envoyproxy/go-control-plane/pkg/cache/types"
 	"github.com/envoyproxy/go-control-plane/pkg/cache/v3"
 	"github.com/envoyproxy/go-control-plane/pkg/resource/v3"
@@ -121,8 +122,10 @@ func (b *SnapshotBuilder) Build(routes []Route, httpsRedirect bool) (*cache.Snap
 							HeaderFilter: &accesslog.HeaderFilter{
 								Header: &route.HeaderMatcher{
 									Name: ":authority",
-									HeaderMatchSpecifier: &route.HeaderMatcher_ExactMatch{
-										ExactMatch: "localhost",
+									HeaderMatchSpecifier: &route.HeaderMatcher_StringMatch{
+										StringMatch: &matcher.StringMatcher{
+											MatchPattern: &matcher.StringMatcher_Exact{Exact: "localhost"},
+										},
 									},
 								},
 							},
@@ -133,8 +136,10 @@ func (b *SnapshotBuilder) Build(routes []Route, httpsRedirect bool) (*cache.Snap
 							HeaderFilter: &accesslog.HeaderFilter{
 								Header: &route.HeaderMatcher{
 									Name: ":authority",
-									HeaderMatchSpecifier: &route.HeaderMatcher_ExactMatch{
-										ExactMatch: "proxy.localhost",
+									HeaderMatchSpecifier: &route.HeaderMatcher_StringMatch{
+										StringMatch: &matcher.StringMatcher{
+											MatchPattern: &matcher.StringMatcher_Exact{Exact: "proxy.localhost"},
+										},
 									},
 								},
 							},
@@ -145,8 +150,10 @@ func (b *SnapshotBuilder) Build(routes []Route, httpsRedirect bool) (*cache.Snap
 							HeaderFilter: &accesslog.HeaderFilter{
 								Header: &route.HeaderMatcher{
 									Name: ":authority",
-									HeaderMatchSpecifier: &route.HeaderMatcher_ExactMatch{
-										ExactMatch: "proxy.internal",
+									HeaderMatchSpecifier: &route.HeaderMatcher_StringMatch{
+										StringMatch: &matcher.StringMatcher{
+											MatchPattern: &matcher.StringMatcher_Exact{Exact: "proxy.internal"},
+										},
 									},
 								},
 							},
@@ -176,8 +183,10 @@ func (b *SnapshotBuilder) Build(routes []Route, httpsRedirect bool) (*cache.Snap
 				},
 				BodyFormatOverride: &core.SubstitutionFormatString{
 					ContentType: "text/html; charset=UTF-8",
-					Format: &core.SubstitutionFormatString_TextFormat{
-						TextFormat: "%LOCAL_REPLY_BODY%",
+					Format: &core.SubstitutionFormatString_TextFormatSource{
+						TextFormatSource: &core.DataSource{
+							Specifier: &core.DataSource_InlineString{InlineString: "%LOCAL_REPLY_BODY%"},
+						},
 					},
 				},
 			},
@@ -189,8 +198,10 @@ func (b *SnapshotBuilder) Build(routes []Route, httpsRedirect bool) (*cache.Snap
 				},
 				BodyFormatOverride: &core.SubstitutionFormatString{
 					ContentType: "text/html; charset=UTF-8",
-					Format: &core.SubstitutionFormatString_TextFormat{
-						TextFormat: "%LOCAL_REPLY_BODY%",
+					Format: &core.SubstitutionFormatString_TextFormatSource{
+						TextFormatSource: &core.DataSource{
+							Specifier: &core.DataSource_InlineString{InlineString: "%LOCAL_REPLY_BODY%"},
+						},
 					},
 				},
 			},
