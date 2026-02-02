@@ -33,6 +33,8 @@ Then navigate to the dashboard https://proxy.localhost
 - `--https-redirect` Force https redirects for all created endpoints
 - `--log-level` Log level for the envoy server. `error`, `info`, `debug`
 - `--trace-process-logs` Show logs from external processes on the dashboard using dtrace on macOS. Requires disabling SIP. This WILL eventually lock up your system badly enough for you to hold down the power button for a restart [unless you're on Tahoe](https://news.ycombinator.com/item?id=45974681)
+- `--xds-port` The port to run the xDS server (default: 18000)
+- `--envoy-admin-port` The port to run the admin interface, including statistics, for envoy (default: 9901)
 
 ### Local process example
 
