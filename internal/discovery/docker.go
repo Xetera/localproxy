@@ -243,8 +243,23 @@ func (w *DockerWatcher) handleEventStream(eventsChan <-chan events.Message, errC
 			if !ok {
 				return fmt.Errorf("event channel closed")
 			}
-			if event.Action == "start" && w.onHealthy != nil {
-				go w.waitForHealthy(event.Actor.ID)
+			switch event.Action {
+			case "start":
+				if w.onHealthy != nil {
+					go w.waitForHealthy(event.Actor.ID)
+				}
+			case "stop", "die":
+				containers, unrouted, err := w.listContainers()
+				if err != nil {
+					log.Printf("docker: failed to list containers after %s: %v", event.Action, err)
+					continue
+				}
+				if w.onChange != nil {
+					w.onChange(containers)
+				}
+				if w.onUnroutedChanged != nil {
+					w.onUnroutedChanged(unrouted)
+				}
 			}
 		case err := <-errChan:
 			return fmt.Errorf("event stream: %w", err)
