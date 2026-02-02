@@ -15,7 +15,7 @@ I hate having to remember random port numbers.
 
 Localproxy solves this problem for me. It runs envoy on port 80 and 443 with a self-signed certificate using [mkcert](https://github.com/FiloSottile/mkcert), and auto-discovers targets from both docker using `EXPOSE` fields and [labels](#docker-example-with-labels), and local processes listening to ports running directly under a given "projects" folder. To allow for non-browser tools to also function, the current running processes are also appended to `/etc/hosts` to make sure they point to 127.0.0.1, and are not resolved through external DNS. This is not already the default behavior on macos for some reason.
 
-Localproxy supports proxying http(s), http/2, http/3 (QUIC) and TCP connections, provided TCP connections use TLS to allow determining the target domain. Otherwise that information is missing without a layer 7 protocol involved (ex: redis with `--tls --sni` and postgres with `?sslnegotiation=direct`)
+Localproxy supports proxying http(s), http/2, http/3 (QUIC) and TCP connections. If there's more than one service running on the same port (ex: 2 postgres databases listening on port 5432), the TCP connections MUST use TLS to allow the proxy to determine the target domain. Otherwise that information is missing without a layer 7 protocol involved (ex: redis with `--tls --sni` and postgres with `?sslnegotiation=direct&sslmode=require`)
 
 Certain well-known ports on your computer are also checked to detect software you may have running locally outside your regular "projects" folder like syncthing, to also proxy connections there as well.
 
