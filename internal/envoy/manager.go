@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -136,6 +138,15 @@ func (m *Manager) spawn() error {
 }
 
 func (m *Manager) writeBootstrapConfig() error {
+	xdsHost, xdsPortStr, err := net.SplitHostPort(m.xdsAddress)
+	if err != nil {
+		return fmt.Errorf("invalid xds address: %w", err)
+	}
+	xdsPort, err := strconv.Atoi(xdsPortStr)
+	if err != nil {
+		return fmt.Errorf("invalid xds port: %w", err)
+	}
+
 	config := map[string]interface{}{
 		"node": map[string]interface{}{
 			"id":      m.nodeID,
@@ -181,8 +192,8 @@ func (m *Manager) writeBootstrapConfig() error {
 							"endpoint": map[string]interface{}{
 								"address": map[string]interface{}{
 									"socket_address": map[string]interface{}{
-										"address":    "127.0.0.1",
-										"port_value": 18000,
+										"address":    xdsHost,
+										"port_value": xdsPort,
 									},
 								},
 							},

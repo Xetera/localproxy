@@ -27,6 +27,7 @@ type Config struct {
 	HTTPSRedirect    bool
 	TraceProcessLogs bool
 	EnvoyAdminPort   int
+	XDSPort          int
 }
 
 type Daemon struct {
@@ -147,15 +148,15 @@ func (d *Daemon) initCerts() error {
 func (d *Daemon) initXDS() error {
 	d.xdsServer = xds.NewServer()
 	d.xdsServer.SetHTTPSRedirect(d.config.HTTPSRedirect)
-	if err := d.xdsServer.Start(":18000"); err != nil {
+	if err := d.xdsServer.Start(fmt.Sprintf(":%d", d.config.XDSPort)); err != nil {
 		return err
 	}
-	log.Printf("xds server listening on :18000")
+	log.Printf("xds server listening on :%d", d.config.XDSPort)
 	return nil
 }
 
 func (d *Daemon) initEnvoy() error {
-	d.envoyMgr = envoy.NewManager(d.dataDir, "127.0.0.1:18000", d.xdsServer.NodeID(), d.config.LogLevel, d.config.EnvoyAdminPort)
+	d.envoyMgr = envoy.NewManager(d.dataDir, fmt.Sprintf("127.0.0.1:%d", d.config.XDSPort), d.xdsServer.NodeID(), d.config.LogLevel, d.config.EnvoyAdminPort)
 	if err := d.envoyMgr.Start(); err != nil {
 		return err
 	}

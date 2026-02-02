@@ -14,6 +14,7 @@ var logLevel string
 var httpsRedirect bool
 var traceProcessLogs bool
 var envoyAdminPort int
+var xdsPort int
 
 func init() {
 	pflag.StringArrayVar(&watchPaths, "watch", []string{}, "Folders to watch for processes (can be specified multiple times)")
@@ -21,6 +22,7 @@ func init() {
 	pflag.BoolVar(&httpsRedirect, "https-redirect", false, "Redirect HTTP requests to HTTPS")
 	pflag.BoolVar(&traceProcessLogs, "trace-process-logs", false, "Trace logs from spawned process stdout/stderr. Requires SIP to be disabled on macos (Will probably cause your system to freeze if you're below Tahoe)")
 	pflag.IntVar(&envoyAdminPort, "envoy-admin-port", 9901, "Envoy admin interface port")
+	pflag.IntVar(&xdsPort, "xds-port", 18000, "XDS server port")
 	pflag.Parse()
 }
 
@@ -33,6 +35,7 @@ func main() {
 		HTTPSRedirect:    httpsRedirect,
 		TraceProcessLogs: traceProcessLogs,
 		EnvoyAdminPort:   envoyAdminPort,
+		XDSPort:          xdsPort,
 	}
 
 	daemon, err := NewDaemon(cfg)
