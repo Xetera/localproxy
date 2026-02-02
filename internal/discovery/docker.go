@@ -389,7 +389,7 @@ func (*DockerWatcher) derivePorts(svc *DiscoveredService, services []ServiceInfo
 				oldPort := svc.Endpoint
 				svc.Endpoint = s.Endpoint
 				svc.Service = &s
-				log.Printf("docker: using HTTP %s instead of %d for %s", s.Endpoint.String(), oldPort, svc.Subdomain)
+				log.Printf("docker: using HTTP %s instead of %s for %s", s.Endpoint.String(), oldPort.String(), svc.Subdomain)
 				port = svc.Endpoint.Port()
 				break
 			}
