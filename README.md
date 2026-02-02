@@ -29,10 +29,10 @@ Then navigate to the dashboard https://proxy.localhost
 
 #### Flags
 
-- `--watch` Adds a folder to watch for processes. Only works with docker if not specified.
-- `--https-redirect` Force https redirects for all created endpoints
-- `--log-level` Log level for the envoy server. `error`, `info`, `debug`
-- `--trace-process-logs` Show logs from external processes on the dashboard using dtrace on macOS. Requires disabling SIP. This WILL eventually lock up your system badly enough for you to hold down the power button for a restart [unless you're on Tahoe](https://news.ycombinator.com/item?id=45974681)
+- `--watch` Adds a folder to watch for processes. Local process watching is disabled if no folders are watched.
+- `--https-redirect` Force https redirects for all created endpoints (default: false)
+- `--log-level` Log level for the envoy server. `error`, `info`, `debug` (default: info)
+- `--trace-process-logs` Show logs from external processes on the dashboard using dtrace on macOS. Requires disabling SIP. This WILL eventually lock up your system badly enough for you to hold down the power button for a restart [unless you're on Tahoe](https://news.ycombinator.com/item?id=45974681) (default: false)
 - `--xds-port` The port to run the xDS server (default: 18000)
 - `--envoy-admin-port` The port to run the admin interface, including statistics, for envoy (default: 9901)
 
