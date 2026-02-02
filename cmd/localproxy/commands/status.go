@@ -11,7 +11,9 @@ import (
 )
 
 func StatusCmd() *cobra.Command {
-	return &cobra.Command{
+	var envoyAdminPort int
+
+	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show daemon and proxy status",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -33,7 +35,7 @@ func StatusCmd() *cobra.Command {
 			}
 
 			envoyStatus := "stopped"
-			resp, err := http.Get("http://127.0.0.1:9901/ready")
+			resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/ready", envoyAdminPort))
 			if err == nil {
 				resp.Body.Close()
 				if resp.StatusCode == 200 {
@@ -52,4 +54,8 @@ func StatusCmd() *cobra.Command {
 			return nil
 		},
 	}
+
+	cmd.Flags().IntVar(&envoyAdminPort, "envoy-admin-port", 9901, "Envoy admin interface port")
+
+	return cmd
 }

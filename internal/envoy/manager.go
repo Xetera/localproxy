@@ -13,33 +13,35 @@ import (
 )
 
 type Manager struct {
-	dataDir      string
-	xdsAddress   string
-	nodeID       string
-	logLevel     string
-	cmd          *exec.Cmd
-	ctx          context.Context
-	cancel       context.CancelFunc
-	mu           sync.Mutex
-	restartDelay time.Duration
-	configPath   string
-	shuttingDown bool
+	dataDir        string
+	xdsAddress     string
+	nodeID         string
+	logLevel       string
+	envoyAdminPort int
+	cmd            *exec.Cmd
+	ctx            context.Context
+	cancel         context.CancelFunc
+	mu             sync.Mutex
+	restartDelay   time.Duration
+	configPath     string
+	shuttingDown   bool
 }
 
-func NewManager(dataDir, xdsAddress, nodeID, logLevel string) *Manager {
+func NewManager(dataDir, xdsAddress, nodeID, logLevel string, envoyAdminPort int) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
 	if logLevel == "" {
 		logLevel = "info"
 	}
 	return &Manager{
-		dataDir:      dataDir,
-		xdsAddress:   xdsAddress,
-		nodeID:       nodeID,
-		logLevel:     logLevel,
-		ctx:          ctx,
-		cancel:       cancel,
-		restartDelay: 2 * time.Second,
-		configPath:   filepath.Join(dataDir, "envoy-bootstrap.json"),
+		dataDir:        dataDir,
+		xdsAddress:     xdsAddress,
+		nodeID:         nodeID,
+		logLevel:       logLevel,
+		envoyAdminPort: envoyAdminPort,
+		ctx:            ctx,
+		cancel:         cancel,
+		restartDelay:   2 * time.Second,
+		configPath:     filepath.Join(dataDir, "envoy-bootstrap.json"),
 	}
 }
 
@@ -193,7 +195,7 @@ func (m *Manager) writeBootstrapConfig() error {
 			"address": map[string]interface{}{
 				"socket_address": map[string]interface{}{
 					"address":    "127.0.0.1",
-					"port_value": 9901,
+					"port_value": m.envoyAdminPort,
 				},
 			},
 		},

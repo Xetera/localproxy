@@ -26,6 +26,7 @@ type Config struct {
 	LogLevel         string
 	HTTPSRedirect    bool
 	TraceProcessLogs bool
+	EnvoyAdminPort   int
 }
 
 type Daemon struct {
@@ -154,11 +155,11 @@ func (d *Daemon) initXDS() error {
 }
 
 func (d *Daemon) initEnvoy() error {
-	d.envoyMgr = envoy.NewManager(d.dataDir, "127.0.0.1:18000", d.xdsServer.NodeID(), d.config.LogLevel)
+	d.envoyMgr = envoy.NewManager(d.dataDir, "127.0.0.1:18000", d.xdsServer.NodeID(), d.config.LogLevel, d.config.EnvoyAdminPort)
 	if err := d.envoyMgr.Start(); err != nil {
 		return err
 	}
-	d.statsScraper = envoy.NewStatsScraper("http://127.0.0.1:9901", 10*time.Second)
+	d.statsScraper = envoy.NewStatsScraper(fmt.Sprintf("http://127.0.0.1:%d", d.config.EnvoyAdminPort), 10*time.Second)
 	d.statsScraper.Start()
 	return nil
 }

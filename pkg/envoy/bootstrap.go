@@ -50,15 +50,15 @@ admin:
   address:
     socket_address:
       address: 127.0.0.1
-      port_value: 9901
+      port_value: %d
 `
 
-func GenerateBootstrap(xdsHost string, xdsPort int, outputDir string) (string, error) {
+func GenerateBootstrap(xdsHost string, xdsPort int, envoyAdminPort int, outputDir string) (string, error) {
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		return "", fmt.Errorf("failed to create output dir: %w", err)
 	}
 
-	content := fmt.Sprintf(bootstrapTemplate, xdsHost, xdsPort)
+	content := fmt.Sprintf(bootstrapTemplate, xdsHost, xdsPort, envoyAdminPort)
 	path := filepath.Join(outputDir, "envoy.yaml")
 
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
