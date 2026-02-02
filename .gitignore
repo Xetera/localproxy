@@ -12,3 +12,4 @@ devenv.local.yaml
 bin/
 /localproxy
 /localproxyd
+.zed
