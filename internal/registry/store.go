@@ -9,10 +9,17 @@ import (
 )
 
 var (
-	projectsBucket = []byte("projects")
-	portsBucket    = []byte("ports")
-	metaBucket     = []byte("meta")
+	projectsBucket          = []byte("projects")
+	portsBucket             = []byte("ports")
+	metaBucket              = []byte("meta")
+	subdomainMappingsBucket = []byte("subdomain_mappings")
 )
+
+type SubdomainMapping struct {
+	FolderGroup string `json:"folder_group"`
+	Subdomain   string `json:"subdomain"`
+	Cwd         string `json:"cwd"`
+}
 
 type Project struct {
 	Name      string `json:"name"`
@@ -44,7 +51,7 @@ func NewStore(path string) (*Store, error) {
 	}
 
 	err = db.Update(func(tx *bolt.Tx) error {
-		for _, bucket := range [][]byte{projectsBucket, portsBucket, metaBucket} {
+		for _, bucket := range [][]byte{projectsBucket, portsBucket, metaBucket, subdomainMappingsBucket} {
 			if _, err := tx.CreateBucketIfNotExists(bucket); err != nil {
 				return err
 			}
@@ -203,4 +210,113 @@ func (s *Store) GetProjectBySubdomain(subdomain string) (*Project, error) {
 		}
 	}
 	return nil, fmt.Errorf("no project with subdomain %s", subdomain)
+}
+
+func (s *Store) AddSubdomainMapping(m *SubdomainMapping) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	err := s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(subdomainMappingsBucket)
+		data, err := json.Marshal(m)
+		if err != nil {
+			return err
+		}
+		return b.Put([]byte(m.Cwd), data)
+	})
+	if err == nil {
+		s.notifyChange()
+	}
+	return err
+}
+
+func (s *Store) RemoveSubdomainMapping(cwd string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	err := s.db.Update(func(tx *bolt.Tx) error {
+		return tx.Bucket(subdomainMappingsBucket).Delete([]byte(cwd))
+	})
+	if err == nil {
+		s.notifyChange()
+	}
+	return err
+}
+
+func (s *Store) GetMappingsForFolder(folderGroup string) ([]*SubdomainMapping, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var mappings []*SubdomainMapping
+	err := s.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(subdomainMappingsBucket)
+		return b.ForEach(func(k, v []byte) error {
+			var m SubdomainMapping
+			if err := json.Unmarshal(v, &m); err != nil {
+				return err
+			}
+			if m.FolderGroup == folderGroup {
+				mappings = append(mappings, &m)
+			}
+			return nil
+		})
+	})
+	return mappings, err
+}
+
+func (s *Store) ListMappings() ([]*SubdomainMapping, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var mappings []*SubdomainMapping
+	err := s.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(subdomainMappingsBucket)
+		return b.ForEach(func(k, v []byte) error {
+			var m SubdomainMapping
+			if err := json.Unmarshal(v, &m); err != nil {
+				return err
+			}
+			mappings = append(mappings, &m)
+			return nil
+		})
+	})
+	return mappings, err
+}
+
+func (s *Store) GetMappingByCwd(cwd string) (*SubdomainMapping, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var m SubdomainMapping
+	err := s.db.View(func(tx *bolt.Tx) error {
+		data := tx.Bucket(subdomainMappingsBucket).Get([]byte(cwd))
+		if data == nil {
+			return fmt.Errorf("mapping for %s not found", cwd)
+		}
+		return json.Unmarshal(data, &m)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
+
+func (s *Store) AddSubdomainMappingData(folderGroup, subdomain, cwd string) error {
+	return s.AddSubdomainMapping(&SubdomainMapping{
+		FolderGroup: folderGroup,
+		Subdomain:   subdomain,
+		Cwd:         cwd,
+	})
+}
+
+func (s *Store) GetMappingSubdomainsByCwd(folderGroup string) (map[string]string, error) {
+	mappings, err := s.GetMappingsForFolder(folderGroup)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]string)
+	for _, m := range mappings {
+		result[m.Cwd] = m.Subdomain
+	}
+	return result, nil
 }

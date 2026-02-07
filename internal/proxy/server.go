@@ -57,6 +57,36 @@ type UnroutedContainer struct {
 	Reason string
 }
 
+type FolderGroupInfo struct {
+	Name     string
+	Services []FolderGroupService
+}
+
+type FolderGroupService struct {
+	PID          int
+	Port         uint16
+	Cwd          string
+	RelativePath string
+	Subdomain    string
+	IsMapped     bool
+}
+
+type RegistryInterface interface {
+	GetFolderGroups() map[string][]discovery.DiscoveredService
+	RefreshRoutes()
+}
+
+type MappingInfo struct {
+	Subdomain string
+	Cwd       string
+}
+
+type StoreInterface interface {
+	AddSubdomainMappingData(folderGroup, subdomain, cwd string) error
+	RemoveSubdomainMapping(cwd string) error
+	GetMappingSubdomainsByCwd(folderGroup string) (map[string]string, error)
+}
+
 type DashboardServer struct {
 	server             *http.Server
 	routes             map[string]Route
@@ -65,6 +95,8 @@ type DashboardServer struct {
 	basePaths          []string
 	unroutedContainers []UnroutedContainer
 	statsScraper       *envoy.StatsScraper
+	registry           RegistryInterface
+	store              StoreInterface
 }
 
 func NewDashboardServer(basePaths []string, traceProcessLogs bool, statsScraper *envoy.StatsScraper) *DashboardServer {
@@ -80,6 +112,7 @@ func NewDashboardServer(basePaths []string, traceProcessLogs bool, statsScraper 
 	mux.HandleFunc("/logs", s.serveLogs)
 	mux.HandleFunc("/api/logs-preview", s.serveLogsPreview)
 	mux.HandleFunc("/api/stats", s.serveStats)
+	mux.HandleFunc("/api/subdomain-mapping", s.handleSubdomainMapping)
 
 	s.server = &http.Server{
 		Addr:         fmt.Sprintf("127.0.0.1:%d", ServerPort),
@@ -89,6 +122,14 @@ func NewDashboardServer(basePaths []string, traceProcessLogs bool, statsScraper 
 	}
 
 	return s
+}
+
+func (s *DashboardServer) SetRegistry(registry RegistryInterface) {
+	s.registry = registry
+}
+
+func (s *DashboardServer) SetStore(store StoreInterface) {
+	s.store = store
 }
 
 func (s *DashboardServer) handleRoot(w http.ResponseWriter, r *http.Request) {
@@ -102,7 +143,46 @@ func (s *DashboardServer) handleRoot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if folder := s.detectFolderGroup(host); folder != "" {
+		s.serveCaptivePortal(w, r, folder)
+		return
+	}
+
 	s.serve404(w, r, host)
+}
+
+func (s *DashboardServer) detectFolderGroup(host string) string {
+	if s.registry == nil {
+		return ""
+	}
+
+	host = strings.Split(host, ":")[0]
+
+	var folderName string
+	if strings.HasSuffix(host, ".localhost") {
+		subdomain := strings.TrimSuffix(host, ".localhost")
+		parts := strings.Split(subdomain, ".")
+		if len(parts) >= 1 {
+			folderName = parts[len(parts)-1]
+		}
+	} else if strings.HasSuffix(host, ".internal") {
+		subdomain := strings.TrimSuffix(host, ".internal")
+		parts := strings.Split(subdomain, ".")
+		if len(parts) >= 1 {
+			folderName = parts[len(parts)-1]
+		}
+	}
+
+	if folderName == "" {
+		return ""
+	}
+
+	folderGroups := s.registry.GetFolderGroups()
+	if _, exists := folderGroups[folderName]; exists {
+		return folderName
+	}
+
+	return ""
 }
 
 func (s *DashboardServer) serve404(w http.ResponseWriter, r *http.Request, host string) {
@@ -639,4 +719,157 @@ func (s *DashboardServer) serveStats(w http.ResponseWriter, r *http.Request) {
 	stats := s.statsScraper.GetClusterStats()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(stats)
+}
+
+func (s *DashboardServer) serveCaptivePortal(w http.ResponseWriter, r *http.Request, folder string) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+
+	folderGroups := s.registry.GetFolderGroups()
+	services, exists := folderGroups[folder]
+	if !exists {
+		s.serve404(w, r, r.Host)
+		return
+	}
+
+	mappingByCwd := make(map[string]string)
+	if s.store != nil {
+		var err error
+		mappingByCwd, err = s.store.GetMappingSubdomainsByCwd(folder)
+		if err != nil {
+			log.Printf("captive portal: failed to get mappings: %v", err)
+			mappingByCwd = make(map[string]string)
+		}
+	}
+
+	var folderServices []FolderGroupService
+	for _, svc := range services {
+		if svc.Process == nil {
+			continue
+		}
+		fgs := FolderGroupService{
+			PID:          svc.Process.PID,
+			Port:         svc.Endpoint.Port(),
+			Cwd:          svc.Process.Cwd,
+			RelativePath: svc.Process.RelativePath,
+		}
+		if subdomain, ok := mappingByCwd[svc.Process.Cwd]; ok {
+			fgs.Subdomain = subdomain
+			fgs.IsMapped = true
+		}
+		folderServices = append(folderServices, fgs)
+	}
+
+	templatesPath := getTemplatesPath()
+	tmpl, err := template.ParseFiles(filepath.Join(templatesPath, "captive.html"))
+	if err != nil {
+		http.Error(w, fmt.Sprintf("template error: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := tmpl.Execute(w, map[string]any{
+		"Folder":   folder,
+		"Services": folderServices,
+	}); err != nil {
+		log.Printf("captive portal template error: %v", err)
+	}
+}
+
+func (s *DashboardServer) handleSubdomainMapping(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		s.addSubdomainMapping(w, r)
+		return
+	}
+	if r.Method == http.MethodDelete {
+		s.removeSubdomainMapping(w, r)
+		return
+	}
+	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+}
+
+func (s *DashboardServer) addSubdomainMapping(w http.ResponseWriter, r *http.Request) {
+	if s.store == nil {
+		http.Error(w, "store not configured", http.StatusInternalServerError)
+		return
+	}
+
+	var req struct {
+		FolderGroup string `json:"folder_group"`
+		Subdomain   string `json:"subdomain"`
+		Cwd         string `json:"cwd"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Subdomain == "" || req.Cwd == "" || req.FolderGroup == "" {
+		http.Error(w, "subdomain, cwd, and folder_group are required", http.StatusBadRequest)
+		return
+	}
+
+	if !isValidSubdomain(req.Subdomain) {
+		http.Error(w, "invalid subdomain format", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.store.AddSubdomainMappingData(req.FolderGroup, req.Subdomain, req.Cwd); err != nil {
+		http.Error(w, fmt.Sprintf("failed to save mapping: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if s.registry != nil {
+		s.registry.RefreshRoutes()
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func (s *DashboardServer) removeSubdomainMapping(w http.ResponseWriter, r *http.Request) {
+	if s.store == nil {
+		http.Error(w, "store not configured", http.StatusInternalServerError)
+		return
+	}
+
+	cwd := r.URL.Query().Get("cwd")
+	if cwd == "" {
+		http.Error(w, "cwd parameter required", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.store.RemoveSubdomainMapping(cwd); err != nil {
+		http.Error(w, fmt.Sprintf("failed to remove mapping: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if s.registry != nil {
+		s.registry.RefreshRoutes()
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func isValidSubdomain(s string) bool {
+	if len(s) == 0 || len(s) > 63 {
+		return false
+	}
+	for i, c := range s {
+		if c >= 'a' && c <= 'z' {
+			continue
+		}
+		if c >= '0' && c <= '9' {
+			continue
+		}
+		if c == '-' && i > 0 && i < len(s)-1 {
+			continue
+		}
+		return false
+	}
+	return true
 }

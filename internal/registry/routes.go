@@ -10,16 +10,30 @@ import (
 	"github.com/xetera/localproxy/internal/proxy"
 )
 
-type RouteRegistry struct {
-	services map[string]discovery.DiscoveredService
-	mu       sync.RWMutex
-	onChange func([]proxy.Route)
+var reservedFolders = map[string]bool{
+	"localproxy": true,
+	"proxy":      true,
 }
 
-func NewRouteRegistry(onChange func([]proxy.Route)) *RouteRegistry {
+type FolderGroup struct {
+	Name     string
+	Services []discovery.DiscoveredService
+}
+
+type RouteRegistry struct {
+	services     map[string]discovery.DiscoveredService
+	folderGroups map[string][]discovery.DiscoveredService
+	store        *Store
+	mu           sync.RWMutex
+	onChange     func([]proxy.Route)
+}
+
+func NewRouteRegistry(onChange func([]proxy.Route), store *Store) *RouteRegistry {
 	return &RouteRegistry{
-		services: make(map[string]discovery.DiscoveredService),
-		onChange: onChange,
+		services:     make(map[string]discovery.DiscoveredService),
+		folderGroups: make(map[string][]discovery.DiscoveredService),
+		store:        store,
+		onChange:     onChange,
 	}
 }
 
@@ -37,10 +51,46 @@ func (r *RouteRegistry) UpdateServices(source discovery.RouteSource, services []
 		}
 	}
 
+	if source == discovery.RouteSourceProcess {
+		r.folderGroups = make(map[string][]discovery.DiscoveredService)
+	}
+
+	for _, svc := range services {
+		if svc.Process != nil && svc.Process.TopLevelFolder != "" {
+			r.folderGroups[svc.Process.TopLevelFolder] = append(
+				r.folderGroups[svc.Process.TopLevelFolder],
+				svc,
+			)
+		}
+	}
+
 	for _, svc := range services {
 		subdomain := svc.Subdomain
-		if svc.Process != nil && svc.Process.NeedsCustomMapping {
-			subdomain = fmt.Sprintf("pid-%d", svc.Process.PID)
+
+		needsMapping := svc.Process != nil && svc.Process.NeedsCustomMapping
+		if svc.Process != nil && svc.Process.TopLevelFolder != "" {
+			folderServices := r.folderGroups[svc.Process.TopLevelFolder]
+			if len(folderServices) >= 2 && !reservedFolders[svc.Process.TopLevelFolder] {
+				needsMapping = true
+			}
+		}
+
+		if needsMapping {
+			if r.store != nil {
+				if mapping, err := r.store.GetMappingByCwd(svc.Process.Cwd); err == nil {
+					subdomain = mapping.Subdomain + "." + mapping.FolderGroup
+					svc.Process.Disabled = false
+					svc.Process.NeedsCustomMapping = false
+				} else {
+					subdomain = fmt.Sprintf("pid-%d", svc.Process.PID)
+					svc.Process.Disabled = true
+					svc.Process.NeedsCustomMapping = true
+				}
+			} else {
+				subdomain = fmt.Sprintf("pid-%d", svc.Process.PID)
+				svc.Process.Disabled = true
+				svc.Process.NeedsCustomMapping = true
+			}
 		}
 
 		existing, exists := r.services[subdomain]
@@ -82,13 +132,25 @@ func (r *RouteRegistry) GetRoutes() []proxy.Route {
 
 func (r *RouteRegistry) getRoutesLocked() []proxy.Route {
 	var routes []proxy.Route
-	endpoint := netip.AddrPortFrom(netip.AddrFrom4([4]byte{127, 0, 0, 1}), proxy.ServerPort)
+	dashboardEndpoint := netip.AddrPortFrom(netip.AddrFrom4([4]byte{127, 0, 0, 1}), proxy.ServerPort)
 	routes = append(routes, proxy.Route{
 		Subdomain: "",
-		Endpoint:  endpoint,
+		Endpoint:  dashboardEndpoint,
 		PID:       0,
 		Source:    discovery.RouteSourceWellKnown,
 	})
+
+	for folderName, services := range r.folderGroups {
+		if len(services) >= 2 && !reservedFolders[folderName] {
+			routes = append(routes, proxy.Route{
+				Subdomain:   folderName,
+				Endpoint:    dashboardEndpoint,
+				Source:      discovery.RouteSourceProcess,
+				HasWildcard: true,
+				FolderGroup: folderName,
+			})
+		}
+	}
 
 	for _, svc := range r.services {
 		route := proxy.Route{
@@ -104,6 +166,12 @@ func (r *RouteRegistry) getRoutesLocked() []proxy.Route {
 			route.Disabled = svc.Process.Disabled
 			route.NeedsCustomMapping = svc.Process.NeedsCustomMapping
 			route.IsDocker = svc.Process.IsDocker
+			route.TopLevelFolder = svc.Process.TopLevelFolder
+			route.RelativePath = svc.Process.RelativePath
+			topFolder := svc.Process.TopLevelFolder
+			if topFolder != "" && len(r.folderGroups[topFolder]) >= 2 && !reservedFolders[topFolder] {
+				route.FolderGroup = topFolder
+			}
 		}
 
 		if svc.Docker != nil {
@@ -147,5 +215,22 @@ func (r *RouteRegistry) UpdateService(svc discovery.DiscoveredService) {
 		return ""
 	}())
 
+	r.notifyChange()
+}
+
+func (r *RouteRegistry) GetFolderGroups() map[string][]discovery.DiscoveredService {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	result := make(map[string][]discovery.DiscoveredService)
+	for k, v := range r.folderGroups {
+		result[k] = append([]discovery.DiscoveredService{}, v...)
+	}
+	return result
+}
+
+func (r *RouteRegistry) RefreshRoutes() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.notifyChange()
 }

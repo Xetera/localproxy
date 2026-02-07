@@ -200,12 +200,12 @@ func (w *ProcessWatcher) processEntry(state *scanState, entry portEntry) {
 		return
 	}
 
-	subdomain, needsCustomMapping := w.buildSubdomain(basePath, cwd, state.ignoredDirs)
-	if subdomain == "" && !needsCustomMapping {
+	result := w.buildSubdomain(basePath, cwd, state.ignoredDirs)
+	if result.subdomain == "" && !result.needsCustomMapping {
 		return
 	}
 
-	w.addListeningProcess(state, pid, entry.Endpoint, subdomain, cwd, needsCustomMapping)
+	w.addListeningProcess(state, pid, entry.Endpoint, result, cwd)
 	state.usedPorts[entry.Endpoint.Port()] = true
 }
 
@@ -247,19 +247,21 @@ func (w *ProcessWatcher) addWellKnownProcess(state *scanState, pid int, endpoint
 	state.usedPorts[port] = true
 }
 
-func (w *ProcessWatcher) addListeningProcess(state *scanState, pid int, endpoint netip.AddrPort, subdomain string, cwd string, needsCustomMapping bool) {
+func (w *ProcessWatcher) addListeningProcess(state *scanState, pid int, endpoint netip.AddrPort, result subdomainResult, cwd string) {
 	if state.seenPID[pid] {
 		return
 	}
 	state.results = append(state.results, DiscoveredService{
-		Subdomain: subdomain,
+		Subdomain: result.subdomain,
 		Endpoint:  endpoint,
 		Source:    RouteSourceProcess,
 		Process: &ProcessInfo{
 			PID:                pid,
 			Cwd:                cwd,
-			Disabled:           needsCustomMapping,
-			NeedsCustomMapping: needsCustomMapping,
+			Disabled:           result.needsCustomMapping,
+			NeedsCustomMapping: result.needsCustomMapping,
+			TopLevelFolder:     result.topLevelFolder,
+			RelativePath:       result.relativePath,
 		},
 	})
 	state.seenPID[pid] = true
@@ -273,28 +275,46 @@ func (w *ProcessWatcher) handleOutsideBasePath(state *scanState, pid int, endpoi
 	w.addWellKnownProcess(state, pid, endpoint)
 }
 
-func (w *ProcessWatcher) buildSubdomain(basePath string, cwd string, ignoredDirs map[string]bool) (string, bool) {
+type subdomainResult struct {
+	subdomain          string
+	needsCustomMapping bool
+	topLevelFolder     string
+	relativePath       string
+}
+
+func (w *ProcessWatcher) buildSubdomain(basePath string, cwd string, ignoredDirs map[string]bool) subdomainResult {
 	rel, err := filepath.Rel(basePath, cwd)
 	if err != nil {
-		return "", false
+		return subdomainResult{}
 	}
 
 	parts := strings.Split(rel, string(filepath.Separator))
 	if len(parts) == 0 || parts[0] == "" || parts[0] == "." {
-		return "", false
+		return subdomainResult{}
 	}
 
 	filteredParts := w.filterPathParts(parts, ignoredDirs)
 	if len(filteredParts) == 0 {
-		return "", false
+		return subdomainResult{}
 	}
+
+	topLevel := filteredParts[0]
 
 	if len(filteredParts) == 1 {
-		subdomain := filteredParts[0]
-		return subdomain, false
+		return subdomainResult{
+			subdomain:          topLevel,
+			needsCustomMapping: false,
+			topLevelFolder:     topLevel,
+			relativePath:       topLevel,
+		}
 	}
 
-	return "", true
+	return subdomainResult{
+		subdomain:          topLevel,
+		needsCustomMapping: true,
+		topLevelFolder:     topLevel,
+		relativePath:       strings.Join(filteredParts, "/"),
+	}
 }
 
 func (w *ProcessWatcher) filterPathParts(parts []string, ignoredDirs map[string]bool) []string {

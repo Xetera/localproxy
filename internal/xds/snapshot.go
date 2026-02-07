@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"fmt"
 	"net"
+	"sort"
 	"time"
 
 	accesslog "github.com/envoyproxy/go-control-plane/envoy/config/accesslog/v3"
@@ -41,13 +42,15 @@ const (
 )
 
 type Route struct {
-	Subdomain string
-	Host      string
-	Port      int
-	TCPPort   int
-	Protocol  Protocol
-	CertPath  string
-	KeyPath   string
+	Subdomain   string
+	Host        string
+	Port        int
+	TCPPort     int
+	Protocol    Protocol
+	CertPath    string
+	KeyPath     string
+	HasWildcard bool
+	FolderGroup string
 }
 
 type SnapshotBuilder struct {
@@ -62,6 +65,13 @@ func (b *SnapshotBuilder) Build(routes []Route, httpsRedirect bool) (*cache.Snap
 	b.version++
 	versionStr := fmt.Sprintf("%d", b.version)
 
+	sort.Slice(routes, func(i, j int) bool {
+		if routes[i].HasWildcard != routes[j].HasWildcard {
+			return !routes[i].HasWildcard
+		}
+		return routes[i].Subdomain < routes[j].Subdomain
+	})
+
 	var clusters []types.Resource
 	var httpsFilterChains []*listener.FilterChain
 	var quicFilterChains []*listener.FilterChain
@@ -74,9 +84,15 @@ func (b *SnapshotBuilder) Build(routes []Route, httpsRedirect bool) (*cache.Snap
 		if r.CertPath == "" || r.KeyPath == "" {
 			continue
 		}
-		secretName := "cert_" + r.Subdomain
+		var secretName string
 		if r.Subdomain == "" {
 			secretName = "cert_localhost"
+		} else if r.FolderGroup != "" {
+			secretName = "cert_wildcard_" + r.FolderGroup
+		} else if r.HasWildcard {
+			secretName = "cert_wildcard_" + r.Subdomain
+		} else {
+			secretName = "cert_" + r.Subdomain
 		}
 		if seenCerts[secretName] {
 			continue
@@ -263,16 +279,41 @@ func (b *SnapshotBuilder) Build(routes []Route, httpsRedirect bool) (*cache.Snap
 	usedPorts := make(map[int]bool)
 	seenSubdomains := make(map[string]bool)
 
+	nonWildcardSubdomains := make(map[string]bool)
 	for _, r := range routes {
-		if seenSubdomains[r.Subdomain] {
+		if !r.HasWildcard && r.Subdomain != "" {
+			nonWildcardSubdomains[r.Subdomain] = true
+		}
+	}
+
+	usedDomains := make(map[string]bool)
+
+	for _, r := range routes {
+		subdomainKey := r.Subdomain
+		if r.HasWildcard {
+			subdomainKey = "wildcard:" + r.Subdomain
+		}
+		if seenSubdomains[subdomainKey] {
 			continue
 		}
-		seenSubdomains[r.Subdomain] = true
+		seenSubdomains[subdomainKey] = true
 		var clusterName string
 		var sniDomains []string
 		if r.Subdomain == "" {
 			clusterName = "cluster_root"
 			sniDomains = []string{"localhost", "proxy.localhost", "proxy.internal"}
+		} else if r.HasWildcard {
+			clusterName = r.Subdomain
+			sniDomains = []string{
+				fmt.Sprintf("*.%s.localhost", r.Subdomain),
+				fmt.Sprintf("*.%s.internal", r.Subdomain),
+			}
+			if !nonWildcardSubdomains[r.Subdomain] {
+				sniDomains = append(sniDomains,
+					fmt.Sprintf("%s.localhost", r.Subdomain),
+					fmt.Sprintf("%s.internal", r.Subdomain),
+				)
+			}
 		} else {
 			clusterName = r.Subdomain
 			sniDomains = []string{
@@ -281,9 +322,15 @@ func (b *SnapshotBuilder) Build(routes []Route, httpsRedirect bool) (*cache.Snap
 			}
 		}
 
-		secretName := "cert_" + r.Subdomain
+		var secretName string
 		if r.Subdomain == "" {
 			secretName = "cert_localhost"
+		} else if r.FolderGroup != "" {
+			secretName = "cert_wildcard_" + r.FolderGroup
+		} else if r.HasWildcard {
+			secretName = "cert_wildcard_" + r.Subdomain
+		} else {
+			secretName = "cert_" + r.Subdomain
 		}
 
 		tlsContext := &tls.DownstreamTlsContext{
@@ -391,9 +438,23 @@ func (b *SnapshotBuilder) Build(routes []Route, httpsRedirect bool) (*cache.Snap
 			})
 			usedPorts[r.TCPPort] = true
 		} else {
+			var filteredDomains []string
+			for _, d := range sniDomains {
+				if !usedDomains[d] {
+					filteredDomains = append(filteredDomains, d)
+					usedDomains[d] = true
+				}
+			}
+			if len(filteredDomains) == 0 {
+				continue
+			}
+			vhostName := fmt.Sprintf("vhost_%s", r.Subdomain)
+			if r.HasWildcard {
+				vhostName = fmt.Sprintf("vhost_wildcard_%s", r.Subdomain)
+			}
 			virtualHosts = append(virtualHosts, &route.VirtualHost{
-				Name:    fmt.Sprintf("vhost_%s", r.Subdomain),
-				Domains: sniDomains,
+				Name:    vhostName,
+				Domains: filteredDomains,
 				Routes: []*route.Route{{
 					Match: &route.RouteMatch{
 						PathSpecifier: &route.RouteMatch_Prefix{Prefix: "/"},

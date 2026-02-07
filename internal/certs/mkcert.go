@@ -42,19 +42,32 @@ func (m *CertManager) Init() error {
 }
 
 func (m *CertManager) EnsureCert(subdomain string) error {
+	return m.ensureCertInternal(subdomain, false)
+}
+
+func (m *CertManager) EnsureWildcardCert(subdomain string) error {
+	return m.ensureCertInternal(subdomain, true)
+}
+
+func (m *CertManager) ensureCertInternal(subdomain string, wildcard bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if _, exists := m.certs[subdomain]; exists {
+	cacheKey := subdomain
+	if wildcard {
+		cacheKey = "wildcard_" + subdomain
+	}
+
+	if _, exists := m.certs[cacheKey]; exists {
 		return nil
 	}
 
-	certPath := filepath.Join(m.certsDir, subdomain+".pem")
-	keyPath := filepath.Join(m.certsDir, subdomain+"-key.pem")
+	certPath := filepath.Join(m.certsDir, cacheKey+".pem")
+	keyPath := filepath.Join(m.certsDir, cacheKey+"-key.pem")
 
 	if _, err := os.Stat(certPath); err == nil {
 		if _, err := os.Stat(keyPath); err == nil {
-			m.certs[subdomain] = &CertPaths{CertPath: certPath, KeyPath: keyPath}
+			m.certs[cacheKey] = &CertPaths{CertPath: certPath, KeyPath: keyPath}
 			return nil
 		}
 	}
@@ -62,6 +75,13 @@ func (m *CertManager) EnsureCert(subdomain string) error {
 	var domains []string
 	if subdomain == "localhost" {
 		domains = []string{"localhost", "proxy.localhost", "proxy.internal"}
+	} else if wildcard {
+		domains = []string{
+			"*." + subdomain + ".localhost",
+			"*." + subdomain + ".internal",
+			subdomain + ".localhost",
+			subdomain + ".internal",
+		}
 	} else {
 		domains = []string{subdomain + ".localhost", subdomain + ".internal"}
 	}
@@ -74,8 +94,20 @@ func (m *CertManager) EnsureCert(subdomain string) error {
 		return fmt.Errorf("failed to generate cert for %v: %w", domains, err)
 	}
 
-	m.certs[subdomain] = &CertPaths{CertPath: certPath, KeyPath: keyPath}
+	m.certs[cacheKey] = &CertPaths{CertPath: certPath, KeyPath: keyPath}
 	return nil
+}
+
+func (m *CertManager) GetWildcardCert(subdomain string) (certPath, keyPath string, ok bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	cacheKey := "wildcard_" + subdomain
+	paths, exists := m.certs[cacheKey]
+	if !exists {
+		return "", "", false
+	}
+	return paths.CertPath, paths.KeyPath, true
 }
 
 func (m *CertManager) GetCert(subdomain string) (certPath, keyPath string, ok bool) {

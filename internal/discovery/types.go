@@ -29,6 +29,8 @@ type ProcessInfo struct {
 	NeedsCustomMapping bool
 	IsWellKnown        bool
 	IsDocker           bool
+	TopLevelFolder     string
+	RelativePath       string
 }
 
 type DockerListener struct {

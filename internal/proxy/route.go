@@ -20,4 +20,8 @@ type Route struct {
 	NeedsCustomMapping bool
 	IsDocker           bool
 	ServiceProtocol    string
+	HasWildcard        bool
+	FolderGroup        string
+	TopLevelFolder     string
+	RelativePath       string
 }

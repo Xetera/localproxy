@@ -40,6 +40,7 @@ type Daemon struct {
 	envoyMgr        *envoy.Manager
 	statsScraper    *envoy.StatsScraper
 	routeRegistry   *registry.RouteRegistry
+	store           *registry.Store
 	dashboardServer *proxy.DashboardServer
 	processWatcher  *discovery.ProcessWatcher
 	dockerWatcher   *discovery.DockerWatcher
@@ -116,12 +117,17 @@ func (d *Daemon) Stop() {
 	if d.envoyMgr != nil {
 		d.envoyMgr.Stop()
 	}
+	if d.store != nil {
+		d.store.Close()
+	}
 	if d.logFile != nil {
 		d.logFile.Close()
 	}
-	err := d.hostsMgr.Cleanup()
-	if err != nil {
-		log.Printf("warning: hosts manager cleanup failed: %v", err)
+	if d.hostsMgr != nil {
+		err := d.hostsMgr.Cleanup()
+		if err != nil {
+			log.Printf("warning: hosts manager cleanup failed: %v", err)
+		}
 	}
 	log.Println("daemon stopped")
 }
@@ -166,9 +172,23 @@ func (d *Daemon) initEnvoy() error {
 }
 
 func (d *Daemon) initRouting() error {
+	storePath := filepath.Join(d.dataDir, "store.db")
+	store, err := registry.NewStore(storePath)
+	if err != nil {
+		return fmt.Errorf("failed to open store: %v", err)
+	}
+	d.store = store
+
 	basePaths := d.getBasePaths()
 	d.dashboardServer = proxy.NewDashboardServer(basePaths, d.config.TraceProcessLogs, d.statsScraper)
-	d.routeRegistry = registry.NewRouteRegistry(d.onRoutesChanged)
+	d.routeRegistry = registry.NewRouteRegistry(d.onRoutesChanged, d.store)
+
+	d.dashboardServer.SetRegistry(d.routeRegistry)
+	d.dashboardServer.SetStore(d.store)
+
+	d.store.SetOnChange(func() {
+		d.routeRegistry.RefreshRoutes()
+	})
 
 	certPath, keyPath, _ := d.certMgr.GetCert("localhost")
 	initialRoute := xds.Route{
@@ -257,20 +277,38 @@ func (d *Daemon) onRoutesChanged(routes []proxy.Route) {
 		if certKey == "" {
 			certKey = "localhost"
 		}
-		if err := d.certMgr.EnsureCert(certKey); err != nil {
-			log.Printf("failed to generate cert for %s: %v", certKey, err)
-			continue
+
+		var certPath, keyPath string
+		useWildcard := r.HasWildcard || r.FolderGroup != ""
+
+		if useWildcard {
+			wildcardKey := certKey
+			if r.FolderGroup != "" && !r.HasWildcard {
+				wildcardKey = r.FolderGroup
+			}
+			if err := d.certMgr.EnsureWildcardCert(wildcardKey); err != nil {
+				log.Printf("failed to generate wildcard cert for %s: %v", wildcardKey, err)
+				continue
+			}
+			certPath, keyPath, _ = d.certMgr.GetWildcardCert(wildcardKey)
+		} else {
+			if err := d.certMgr.EnsureCert(certKey); err != nil {
+				log.Printf("failed to generate cert for %s: %v", certKey, err)
+				continue
+			}
+			certPath, keyPath, _ = d.certMgr.GetCert(certKey)
 		}
-		certPath, keyPath, _ := d.certMgr.GetCert(certKey)
 
 		xdsRoute := xds.Route{
-			Subdomain: r.Subdomain,
-			Host:      r.Endpoint.Addr().String(),
-			Port:      int(r.Endpoint.Port()),
-			TCPPort:   r.TCPPort,
-			Protocol:  xds.ProtocolHTTP,
-			CertPath:  certPath,
-			KeyPath:   keyPath,
+			Subdomain:   r.Subdomain,
+			Host:        r.Endpoint.Addr().String(),
+			Port:        int(r.Endpoint.Port()),
+			TCPPort:     r.TCPPort,
+			Protocol:    xds.ProtocolHTTP,
+			CertPath:    certPath,
+			KeyPath:     keyPath,
+			HasWildcard: r.HasWildcard,
+			FolderGroup: r.FolderGroup,
 		}
 		if r.TCPPort > 0 {
 			xdsRoute.Protocol = xds.ProtocolTCP

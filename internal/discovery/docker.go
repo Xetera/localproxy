@@ -352,7 +352,6 @@ func (w *DockerWatcher) DiscoverServiceInfo(svc DiscoveredService, onDiscovered 
 	log.Printf("docker: starting service discovery for %s on %d ports", svc.Subdomain, len(targets))
 	results := make(chan []ServiceInfo, 1)
 	ProbeEndpoints(w.ctx, targets, results)
-	onDiscovered(svc)
 
 	go w.onServiceDiscovered(svc, results, portToIndex, onDiscovered)
 }
