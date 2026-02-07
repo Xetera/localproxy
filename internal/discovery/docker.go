@@ -189,10 +189,10 @@ func (w *DockerWatcher) parseContainer(c container.Summary) (*DiscoveredService,
 	}
 
 	rawEndpoint := fmt.Sprintf("%s:%d", ip, port)
-	endpoint, error := netip.ParseAddrPort(rawEndpoint)
-	if error != nil {
-		fmt.Printf("Invalid endpoint %s\n", rawEndpoint)
-		log.Fatal(error)
+	endpoint, err := netip.ParseAddrPort(rawEndpoint)
+	if err != nil {
+		log.Printf("docker: invalid endpoint %s: %v", rawEndpoint, err)
+		return nil, fmt.Sprintf("invalid endpoint: %s", rawEndpoint)
 	}
 
 	return &DiscoveredService{

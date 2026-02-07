@@ -235,6 +235,7 @@ func (w *ProcessWatcher) addWellKnownProcess(state *scanState, pid int, endpoint
 	}
 	state.results = append(state.results, DiscoveredService{
 		Subdomain: info.Subdomain,
+		Endpoint:  endpoint,
 		TCPPort:   info.TCPPort,
 		Source:    RouteSourceWellKnown,
 		Process: &ProcessInfo{

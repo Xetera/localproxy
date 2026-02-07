@@ -20,6 +20,7 @@ func NewNotifier() *Notifier {
 	}
 }
 
+// TODO: this doesn't really work
 func (n *Notifier) NotifyBackend(subdomain string, isDocker bool) error {
 	title := "New Proxy Backend"
 	message := subdomain + ".localhost is now available"
