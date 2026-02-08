@@ -25,7 +25,7 @@ func ProbeEndpoints(ctx context.Context, addrs []netip.AddrPort, results chan<- 
 		for _, address := range addrs {
 			t = append(t, plugins.Target{
 				Address: address,
-				Host:    "",
+				Host:    "localhost",
 			})
 		}
 
@@ -33,7 +33,7 @@ func ProbeEndpoints(ctx context.Context, addrs []netip.AddrPort, results chan<- 
 			return
 		}
 
-		retryDelays := []time.Duration{0, 3 * time.Second, 3 * time.Second}
+		retryDelays := []time.Duration{0, 3 * time.Second, 6 * time.Second}
 
 		for attempt, delay := range retryDelays {
 			if delay > 0 {
@@ -53,7 +53,7 @@ func ProbeEndpoints(ctx context.Context, addrs []netip.AddrPort, results chan<- 
 				UDP:            false,
 				FastMode:       false,
 				Verbose:        false,
-				DefaultTimeout: 2 * time.Second,
+				DefaultTimeout: time.Second,
 			})
 			if err != nil {
 				log.Printf("fingerprint: scan error (attempt %d): %v\n", attempt+1, err)
