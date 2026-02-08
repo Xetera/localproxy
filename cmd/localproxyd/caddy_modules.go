@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net"
+	"net/netip"
 	"os"
 	"sync"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/mholt/caddy-l4/layer4"
 	"github.com/mholt/caddy-l4/modules/l4proxy"
 	"github.com/mholt/caddy-l4/modules/l4tls"
+	"github.com/xetera/localproxy/internal/proxy/protocol"
 	"go.uber.org/zap"
 )
 
@@ -156,12 +158,42 @@ func (h *TapHandler) Handle(cx *layer4.Connection, next layer4.Handler) error {
 	start := time.Now()
 	remoteAddr := cx.RemoteAddr().String()
 
+	var remoteAddrPort netip.AddrPort
+	var addressParsed bool
+	switch addr := cx.RemoteAddr().(type) {
+	case *net.TCPAddr:
+		ipBytes := addr.IP
+		if addr.IP.To4() != nil {
+			ipBytes = addr.IP.To4()
+		} else if addr.IP.To16() != nil {
+			ipBytes = addr.IP.To16()
+		}
+		netipAddr, parseOk := netip.AddrFromSlice(ipBytes)
+		addressParsed = parseOk
+		if addressParsed {
+			remoteAddrPort = netip.AddrPortFrom(netipAddr, uint16(addr.Port))
+		}
+	case *net.UDPAddr:
+		ipBytes := addr.IP
+		if addr.IP.To4() != nil {
+			ipBytes = addr.IP.To4()
+		} else if addr.IP.To16() != nil {
+			ipBytes = addr.IP.To16()
+		}
+		netipAddr, parseOk := netip.AddrFromSlice(ipBytes)
+		addressParsed = parseOk
+		if addressParsed {
+			remoteAddrPort = netip.AddrPortFrom(netipAddr, uint16(addr.Port))
+		}
+	}
+
 	wrapped := &tappedConn{
 		Conn:       cx.Conn,
 		remoteAddr: remoteAddr,
 		start:      start,
 		logger:     h.logger,
-		parseProto: h.ParseProtocol,
+		parseProto: addressParsed && h.ParseProtocol,
+		addrPort:   remoteAddrPort,
 	}
 	cx.Conn = wrapped
 
@@ -202,13 +234,14 @@ type tappedConn struct {
 	bytesOut   int64
 	logger     *zap.Logger
 	parseProto bool
+	addrPort   netip.AddrPort
 }
 
 func (c *tappedConn) Read(p []byte) (n int, err error) {
 	n, err = c.Conn.Read(p)
 	c.bytesIn += int64(n)
 	if n > 0 && c.parseProto {
-		if msg := ParseFrontendMessage(p[:n]); msg != nil {
+		if msg := protocol.ParseFrontendMessage(c.addrPort, p[:n]); msg != nil {
 			c.logger.Info("pg frontend message",
 				zap.String("type", msg.Type),
 				zap.Any("details", msg.Details),
@@ -222,7 +255,7 @@ func (c *tappedConn) Write(p []byte) (n int, err error) {
 	n, err = c.Conn.Write(p)
 	c.bytesOut += int64(n)
 	if n > 0 && c.parseProto {
-		if msg := ParseBackendMessage(p[:n]); msg != nil {
+		if msg := protocol.ParseBackendMessage(c.addrPort, p[:n]); msg != nil {
 			c.logger.Info("pg backend message",
 				zap.String("type", msg.Type),
 				zap.Any("details", msg.Details),

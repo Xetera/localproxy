@@ -1,8 +1,9 @@
-package main
+package protocol
 
 import (
 	"bytes"
 	"encoding/json"
+	"net/netip"
 	"sync"
 	"time"
 
@@ -18,28 +19,31 @@ type PgMessage struct {
 }
 
 var (
-	pgMessages   []PgMessage
+	pgMessages   map[netip.AddrPort][]PgMessage
 	pgMessagesMu sync.RWMutex
 )
 
-func GetPgMessages() []PgMessage {
+func GetPgMessages(endpoint netip.AddrPort) []PgMessage {
 	pgMessagesMu.RLock()
 	defer pgMessagesMu.RUnlock()
 	result := make([]PgMessage, len(pgMessages))
-	copy(result, pgMessages)
+	messages, ok := pgMessages[endpoint]
+	if ok {
+		copy(result, messages)
+	}
 	return result
 }
 
-func recordPgMessage(msg PgMessage) {
+func recordPgMessage(endpoint netip.AddrPort, msg PgMessage) {
 	pgMessagesMu.Lock()
-	pgMessages = append(pgMessages, msg)
-	if len(pgMessages) > 1000 {
-		pgMessages = pgMessages[1:]
+	pgMessages[endpoint] = append(pgMessages[endpoint], msg)
+	if len(pgMessages[endpoint]) > 1000 {
+		pgMessages[endpoint] = pgMessages[endpoint][1:]
 	}
 	pgMessagesMu.Unlock()
 }
 
-func ParseFrontendMessage(data []byte) *PgMessage {
+func ParseFrontendMessage(endpoint netip.AddrPort, data []byte) *PgMessage {
 	if len(data) < 4 {
 		return nil
 	}
@@ -61,7 +65,7 @@ func ParseFrontendMessage(data []byte) *PgMessage {
 				"partial":    true,
 				"bytes_recv": len(data),
 			}
-			recordPgMessage(*msg)
+			recordPgMessage(endpoint, *msg)
 			return msg
 		}
 
@@ -84,7 +88,7 @@ func ParseFrontendMessage(data []byte) *PgMessage {
 			msg.Type = "UnknownStartup"
 		}
 
-		recordPgMessage(*msg)
+		recordPgMessage(endpoint, *msg)
 		return msg
 	}
 
@@ -115,9 +119,9 @@ func ParseFrontendMessage(data []byte) *PgMessage {
 		if err := b.Decode(data[5:]); err == nil {
 			msg.Type = "Bind"
 			msg.Details = map[string]any{
-				"portal":              b.DestinationPortal,
-				"prepared_statement":  b.PreparedStatement,
-				"parameter_count":     len(b.Parameters),
+				"portal":             b.DestinationPortal,
+				"prepared_statement": b.PreparedStatement,
+				"parameter_count":    len(b.Parameters),
 			}
 		}
 	case 'E':
@@ -161,13 +165,13 @@ func ParseFrontendMessage(data []byte) *PgMessage {
 	}
 
 	if msg.Type != "" {
-		recordPgMessage(*msg)
+		recordPgMessage(endpoint, *msg)
 	}
 
 	return msg
 }
 
-func ParseBackendMessage(data []byte) *PgMessage {
+func ParseBackendMessage(endpoint netip.AddrPort, data []byte) *PgMessage {
 	if len(data) < 5 {
 		return nil
 	}
@@ -287,7 +291,7 @@ func ParseBackendMessage(data []byte) *PgMessage {
 	}
 
 	if msg.Type != "" {
-		recordPgMessage(*msg)
+		recordPgMessage(endpoint, *msg)
 	}
 
 	return msg
