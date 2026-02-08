@@ -577,7 +577,7 @@
               https://{{if
               .SelectedBackend.Subdomain}}{{.SelectedBackend.Subdomain}}.{{end}}localhost
             </a>
-            <div class="metrics-grid">
+            <!--<div class="metrics-grid">
               <div class="metric-card">
                 <div class="metric-label">Traffic</div>
                 <div class="metric-value">
@@ -654,7 +654,7 @@
                   <span class="metric-unit">disconnects</span>
                 </div>
               </div>
-            </div>
+            </div>-->
             <div class="info-grid">
               <div class="info-item">
                 <span class="info-label">PID:</span>
@@ -698,7 +698,8 @@
                   class="port-item{{if eq .Port (port $.SelectedBackend.Endpoint)}} active{{end}}"
                 >
                   <span class="port-arrow"
-                    >{{if eq .Port (port $.SelectedBackend.Endpoint)}}&gt;{{end}}</span
+                    >{{if eq .Port (port
+                    $.SelectedBackend.Endpoint)}}&gt;{{end}}</span
                   >
                   <span>:{{.Text}}</span>
                   <span class="port-protocol">{{or .Protocol "?"}}</span>
@@ -715,8 +716,8 @@
               >
                 <div class="logs-container">
                   <!-- Debug: Source = "{{.SelectedBackend.Source}}" -->
-                  {{if and .SelectedBackend (eq .SelectedBackend.Source "process")
-                  (not $.TraceProcessLogs)}}
+                  {{if and .SelectedBackend (eq .SelectedBackend.Source
+                  "process") (not $.TraceProcessLogs)}}
                   <div class="log-disclaimer">
                     <p>
                       Logs for processes are disabled. To enable them, run

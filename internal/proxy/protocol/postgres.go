@@ -10,9 +10,16 @@ import (
 	"github.com/jackc/pgx/v5/pgproto3"
 )
 
+type Direction int
+
+const (
+	DirectionClientToServer Direction = 0
+	DirectionServerToClient Direction = iota
+)
+
 type PgMessage struct {
 	Timestamp time.Time `json:"timestamp"`
-	Direction string    `json:"direction"`
+	Direction Direction `json:"direction"`
 	Type      string    `json:"type"`
 	Details   any       `json:"details,omitempty"`
 	Raw       []byte    `json:"-"`
@@ -50,7 +57,7 @@ func ParseFrontendMessage(endpoint netip.AddrPort, data []byte) *PgMessage {
 
 	msg := &PgMessage{
 		Timestamp: time.Now(),
-		Direction: "client->server",
+		Direction: DirectionClientToServer,
 		Raw:       data,
 	}
 
@@ -178,7 +185,7 @@ func ParseBackendMessage(endpoint netip.AddrPort, data []byte) *PgMessage {
 
 	msg := &PgMessage{
 		Timestamp: time.Now(),
-		Direction: "server->client",
+		Direction: DirectionServerToClient,
 		Raw:       data,
 	}
 

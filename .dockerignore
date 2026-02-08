@@ -1,0 +1,16 @@
+.git
+.gitignore
+.github
+.devenv
+devenv.nix
+devenv.yaml
+devenv.lock
+.envrc
+.zed
+.claude
+README.md
+showcase.jpg
+bin/
+localproxyd
+*.md
+!README.md
