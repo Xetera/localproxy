@@ -134,7 +134,7 @@ func (s *DashboardServer) handleRoot(w http.ResponseWriter, r *http.Request) {
 		host = fwdHost
 	}
 
-	if host == "localhost" || host == "proxy.localhost" || host == "proxy.internal" || host == fmt.Sprintf("127.0.0.1:%d", ServerPort) || host == fmt.Sprintf("localhost:%d", ServerPort) {
+	if host == "localhost" || host == "internal" || host == fmt.Sprintf("127.0.0.1:%d", ServerPort) || host == fmt.Sprintf("localhost:%d", ServerPort) {
 		s.serveDashboard(w, r)
 		return
 	}

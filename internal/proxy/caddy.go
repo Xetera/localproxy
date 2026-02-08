@@ -53,8 +53,8 @@ func BuildCaddyConfig(routes []Route, httpsRedirect bool) (*caddyhttp.App, *cadd
 		var hosts caddyhttp.MatchHost
 		var sniNames []string
 		if r.Subdomain == "" {
-			hosts = caddyhttp.MatchHost{"localhost", "proxy.localhost", "proxy.internal"}
-			sniNames = []string{"localhost", "proxy.localhost", "proxy.internal"}
+			hosts = caddyhttp.MatchHost{"localhost", "internal"}
+			sniNames = []string{"localhost", "internal"}
 		} else {
 			hosts = caddyhttp.MatchHost{
 				r.Subdomain + ".localhost",

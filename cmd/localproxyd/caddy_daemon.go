@@ -75,9 +75,9 @@ func NewCaddyDaemon(cfg CaddyConfig) (*CaddyDaemon, error) {
 }
 
 func (d *CaddyDaemon) Start() error {
-	// if err := d.initHosts(); err != nil {
-	// 	log.Printf("warning: hosts manager disabled: %v", err)
-	// }
+	if err := d.initHosts(); err != nil {
+		log.Printf("warning: hosts manager disabled: %v", err)
+	}
 
 	if err := d.initCerts(); err != nil {
 		return err

@@ -9,7 +9,10 @@
         padding: 0;
       }
       body {
-        font-family: system-ui, -apple-system, sans-serif;
+        font-family:
+          system-ui,
+          -apple-system,
+          sans-serif;
         color: #e5e5e5;
         background: #0a0a0a;
         min-height: 100vh;
@@ -174,7 +177,8 @@
     <div class="container">
       <h1>{{.Folder}}.localhost</h1>
       <p class="subtitle">
-        Multiple processes are running under this folder. Assign subdomains to route traffic to specific processes.
+        Multiple processes are running under this folder. Assign subdomains to
+        route traffic to specific processes.
       </p>
 
       <div class="service-list">
@@ -190,7 +194,9 @@
             </div>
             {{if .IsMapped}}
             <div class="mapped-badge">
-              <span class="mapped-url">{{.Subdomain}}.{{$.Folder}}.localhost</span>
+              <span class="mapped-url"
+                >{{.Subdomain}}.{{$.Folder}}.localhost</span
+              >
             </div>
             {{end}}
           </div>
@@ -198,16 +204,28 @@
           <div class="mapping-form">
             {{if .IsMapped}}
             <div class="input-group">
-              <input type="text" value="{{.Subdomain}}" disabled>
+              <input type="text" value="{{.Subdomain}}" disabled />
               <span class="input-suffix">.{{$.Folder}}.localhost</span>
             </div>
-            <button class="btn btn-danger" onclick="removeMapping('{{.Cwd}}')">Remove</button>
+            <button class="btn btn-danger" onclick="removeMapping('{{.Cwd}}')">
+              Remove
+            </button>
             {{else}}
             <div class="input-group">
-              <input type="text" placeholder="subdomain" id="input-{{.PID}}" pattern="[a-z0-9\-]+">
+              <input
+                type="text"
+                placeholder="subdomain"
+                id="input-{{.PID}}"
+                pattern="[a-z0-9\-]+"
+              />
               <span class="input-suffix">.{{$.Folder}}.localhost</span>
             </div>
-            <button class="btn btn-primary" onclick="saveMapping('{{$.Folder}}', '{{.Cwd}}', {{.PID}})">Save</button>
+            <button
+              class="btn btn-primary"
+              onclick="saveMapping('{{$.Folder}}', '{{.Cwd}}', {{.PID}})"
+            >
+              Save
+            </button>
             {{end}}
           </div>
           <div class="status-message" id="status-{{.PID}}"></div>
@@ -215,34 +233,38 @@
         {{end}}
       </div>
 
-      <a href="https://proxy.localhost" class="back-link">Back to Dashboard</a>
+      <a href="https://localhost" class="back-link">Back to Dashboard</a>
     </div>
 
     <script>
       async function saveMapping(folder, cwd, pid) {
-        const input = document.getElementById('input-' + pid);
+        const input = document.getElementById("input-" + pid);
         const subdomain = input.value.trim().toLowerCase();
-        const statusEl = document.getElementById('status-' + pid);
+        const statusEl = document.getElementById("status-" + pid);
 
         if (!subdomain) {
-          showStatus(statusEl, 'Please enter a subdomain', 'error');
+          showStatus(statusEl, "Please enter a subdomain", "error");
           return;
         }
 
         if (!/^[a-z0-9][a-z0-9\-]*[a-z0-9]$|^[a-z0-9]$/.test(subdomain)) {
-          showStatus(statusEl, 'Subdomain must contain only lowercase letters, numbers, and hyphens', 'error');
+          showStatus(
+            statusEl,
+            "Subdomain must contain only lowercase letters, numbers, and hyphens",
+            "error",
+          );
           return;
         }
 
         try {
-          const res = await fetch('/api/subdomain-mapping', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+          const res = await fetch("/api/subdomain-mapping", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               folder_group: folder,
               subdomain: subdomain,
-              cwd: cwd
-            })
+              cwd: cwd,
+            }),
           });
 
           if (!res.ok) {
@@ -250,20 +272,24 @@
             throw new Error(text);
           }
 
-          showStatus(statusEl, 'Mapping saved! Redirecting...', 'success');
+          showStatus(statusEl, "Mapping saved! Redirecting...", "success");
           setTimeout(() => {
-            window.location.href = 'https://' + subdomain + '.' + folder + '.localhost';
+            window.location.href =
+              "https://" + subdomain + "." + folder + ".localhost";
           }, 1000);
         } catch (err) {
-          showStatus(statusEl, 'Error: ' + err.message, 'error');
+          showStatus(statusEl, "Error: " + err.message, "error");
         }
       }
 
       async function removeMapping(cwd) {
         try {
-          const res = await fetch('/api/subdomain-mapping?cwd=' + encodeURIComponent(cwd), {
-            method: 'DELETE'
-          });
+          const res = await fetch(
+            "/api/subdomain-mapping?cwd=" + encodeURIComponent(cwd),
+            {
+              method: "DELETE",
+            },
+          );
 
           if (!res.ok) {
             const text = await res.text();
@@ -272,13 +298,13 @@
 
           window.location.reload();
         } catch (err) {
-          alert('Error: ' + err.message);
+          alert("Error: " + err.message);
         }
       }
 
       function showStatus(el, message, type) {
         el.textContent = message;
-        el.className = 'status-message ' + type;
+        el.className = "status-message " + type;
       }
     </script>
   </body>
