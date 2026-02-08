@@ -166,7 +166,7 @@ func BuildCaddyConfig(routes []Route, httpsRedirect bool) (*caddyhttp.App, *cadd
 	return httpApp, tlsApp
 }
 
-func BuildFullCaddyConfig(routes []Route, adminSocket string, httpsRedirect bool) (*caddy.Config, error) {
+func BuildFullCaddyConfig(routes []Route, adminSocket string, httpsRedirect bool, logLevel string) (*caddy.Config, error) {
 	httpApp, tlsApp := BuildCaddyConfig(routes, httpsRedirect)
 
 	httpJSON, err := json.Marshal(httpApp)
@@ -185,7 +185,7 @@ func BuildFullCaddyConfig(routes []Route, adminSocket string, httpsRedirect bool
 				"default": {
 					BaseLog: caddy.BaseLog{
 						WriterRaw: json.RawMessage(`{"output": "stdout"}`),
-						Level:     "WARN",
+						Level:     logLevel,
 					},
 				},
 			},

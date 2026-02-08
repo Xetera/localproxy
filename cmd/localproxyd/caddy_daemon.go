@@ -214,7 +214,7 @@ func (d *CaddyDaemon) startCaddy() error {
 		},
 	}
 
-	cfg, err := proxy.BuildFullCaddyConfig(routes, adminSocket, d.config.HTTPSRedirect)
+	cfg, err := proxy.BuildFullCaddyConfig(routes, adminSocket, d.config.HTTPSRedirect, d.config.LogLevel)
 	if err != nil {
 		return fmt.Errorf("failed to build caddy config: %w", err)
 	}
@@ -291,7 +291,7 @@ func (d *CaddyDaemon) onRoutesChanged(routes []proxy.Route, backends []dashboard
 		subdomains = append(subdomains, r.Subdomain)
 	}
 
-	cfg, err := proxy.BuildFullCaddyConfig(caddyRoutes, adminSocket, d.config.HTTPSRedirect)
+	cfg, err := proxy.BuildFullCaddyConfig(caddyRoutes, adminSocket, d.config.HTTPSRedirect, d.config.LogLevel)
 	if err != nil {
 		log.Printf("failed to build caddy config: %v", err)
 		return
