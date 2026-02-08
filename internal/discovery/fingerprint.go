@@ -53,7 +53,7 @@ func ProbeEndpoints(ctx context.Context, addrs []netip.AddrPort, results chan<- 
 				UDP:            false,
 				FastMode:       false,
 				Verbose:        false,
-				DefaultTimeout: time.Second,
+				DefaultTimeout: time.Second * time.Duration(attempt),
 			})
 			if err != nil {
 				log.Printf("fingerprint: scan error (attempt %d): %v\n", attempt+1, err)

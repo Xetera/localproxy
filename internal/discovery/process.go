@@ -161,7 +161,6 @@ func (w *ProcessWatcher) scan() ([]DiscoveredService, error) {
 		log.Printf("process: getListeningPorts error: %v", err)
 		return nil, err
 	}
-	log.Printf("process: scanning %d listeners", len(listeners))
 
 	state := &scanState{
 		ignoredDirs: map[string]bool{"apps": true, "packages": true},
@@ -171,11 +170,9 @@ func (w *ProcessWatcher) scan() ([]DiscoveredService, error) {
 	}
 
 	for _, entry := range listeners {
-		log.Printf("process: processing PID=%d port=%d", entry.PID, entry.Endpoint.Port())
 		w.processEntry(state, entry)
 	}
 
-	log.Printf("process: scan complete, found %d results", len(state.results))
 	return state.results, nil
 }
 
@@ -191,7 +188,6 @@ func (w *ProcessWatcher) processEntry(state *scanState, entry portEntry) {
 	pid := entry.PID
 
 	cwd := w.getOrCacheCWD(state, pid)
-	log.Printf("process: PID=%d cwd='%s'", pid, cwd)
 
 	if cwd == "" {
 		log.Printf("process: PID=%d has no CWD, trying well-known", pid)
@@ -200,15 +196,12 @@ func (w *ProcessWatcher) processEntry(state *scanState, entry portEntry) {
 	}
 
 	basePath := w.findMatchingBasePath(cwd)
-	log.Printf("process: PID=%d basePath='%s', basePaths=%v", pid, basePath, w.basePaths)
 	if basePath == "" {
-		log.Printf("process: PID=%d outside base paths, trying well-known", pid)
 		w.handleOutsideBasePath(state, pid, entry.Endpoint)
 		return
 	}
 
 	result := w.buildSubdomain(basePath, cwd, state.ignoredDirs)
-	log.Printf("process: PID=%d subdomain='%s', needsCustomMapping=%v", pid, result.subdomain, result.needsCustomMapping)
 	if result.subdomain == "" && !result.needsCustomMapping {
 		return
 	}
@@ -239,10 +232,8 @@ func (w *ProcessWatcher) addWellKnownProcess(state *scanState, pid int, endpoint
 	port := endpoint.Port()
 	info, ok := WellKnownPorts[port]
 	if !ok || state.usedPorts[port] {
-		log.Printf("process: PID=%d port=%d not well-known or already used (ok=%v, used=%v)", pid, port, ok, state.usedPorts[port])
 		return
 	}
-	log.Printf("process: adding PID=%d as well-known service: %s", pid, info.Subdomain)
 	state.results = append(state.results, DiscoveredService{
 		Subdomain: info.Subdomain,
 		Endpoint:  endpoint,
