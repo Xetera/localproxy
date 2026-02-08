@@ -1,4 +1,4 @@
-package proxy
+package dashboard
 
 import (
 	"bufio"
@@ -269,7 +269,7 @@ func (lm *LogManager) drainBuffer(buffer *LogBuffer, src *bytes.Buffer) {
 	}
 }
 
-func (lm *LogManager) UpdateRoutes(routes []Route) {
+func (lm *LogManager) UpdateBackends(backends []Backend) {
 	activeKeys := make(map[string]bool)
 
 	if !lm.traceProcessLogs && traceWarned {
@@ -277,15 +277,15 @@ func (lm *LogManager) UpdateRoutes(routes []Route) {
 		traceWarned = true
 	}
 
-	for _, route := range routes {
-		if route.Source == discovery.RouteSourceDocker && route.DockerContainerID != "" {
-			key := "docker:" + route.DockerContainerID
+	for _, backend := range backends {
+		if backend.Source == discovery.RouteSourceDocker && backend.DockerContainerID != "" {
+			key := "docker:" + backend.DockerContainerID
 			activeKeys[key] = true
-			lm.StartDockerLogs(route.DockerContainerID)
-		} else if lm.traceProcessLogs && route.PID > 0 {
-			key := "pid:" + strconv.Itoa(route.PID)
+			lm.StartDockerLogs(backend.DockerContainerID)
+		} else if lm.traceProcessLogs && backend.PID > 0 {
+			key := "pid:" + strconv.Itoa(backend.PID)
 			activeKeys[key] = true
-			lm.StartTracing(key, route.PID)
+			lm.StartTracing(key, backend.PID)
 		}
 	}
 

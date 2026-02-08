@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"sync"
 
+	"github.com/xetera/localproxy/internal/dashboard"
 	"github.com/xetera/localproxy/internal/discovery"
 	"github.com/xetera/localproxy/internal/proxy"
 )
@@ -25,10 +26,10 @@ type RouteRegistry struct {
 	folderGroups map[string][]discovery.DiscoveredService
 	store        *Store
 	mu           sync.RWMutex
-	onChange     func([]proxy.Route)
+	onChange     func([]proxy.Route, []dashboard.Backend)
 }
 
-func NewRouteRegistry(onChange func([]proxy.Route), store *Store) *RouteRegistry {
+func NewRouteRegistry(onChange func([]proxy.Route, []dashboard.Backend), store *Store) *RouteRegistry {
 	return &RouteRegistry{
 		services:     make(map[string]discovery.DiscoveredService),
 		folderGroups: make(map[string][]discovery.DiscoveredService),
@@ -37,7 +38,7 @@ func NewRouteRegistry(onChange func([]proxy.Route), store *Store) *RouteRegistry
 	}
 }
 
-func (r *RouteRegistry) SetOnChange(fn func([]proxy.Route)) {
+func (r *RouteRegistry) SetOnChange(fn func([]proxy.Route, []dashboard.Backend)) {
 	r.onChange = fn
 }
 
@@ -124,30 +125,39 @@ func (r *RouteRegistry) priority(source discovery.RouteSource) int {
 	}
 }
 
-func (r *RouteRegistry) GetRoutes() []proxy.Route {
+func (r *RouteRegistry) GetRoutes() ([]proxy.Route, []dashboard.Backend) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.getRoutesLocked()
 }
 
-func (r *RouteRegistry) getRoutesLocked() []proxy.Route {
+func (r *RouteRegistry) getRoutesLocked() ([]proxy.Route, []dashboard.Backend) {
 	var routes []proxy.Route
-	dashboardEndpoint := netip.AddrPortFrom(netip.AddrFrom4([4]byte{127, 0, 0, 1}), proxy.ServerPort)
-	routes = append(routes, proxy.Route{
+	var backends []dashboard.Backend
+	dashboardEndpoint := netip.AddrPortFrom(netip.AddrFrom4([4]byte{127, 0, 0, 1}), dashboard.ServerPort)
+
+	rootRoute := proxy.Route{
 		Subdomain: "",
 		Endpoint:  dashboardEndpoint,
-		PID:       0,
-		Source:    discovery.RouteSourceWellKnown,
+	}
+	routes = append(routes, rootRoute)
+	backends = append(backends, dashboard.Backend{
+		Route:  rootRoute,
+		Source: discovery.RouteSourceWellKnown,
 	})
 
 	for folderName, services := range r.folderGroups {
 		if len(services) >= 2 && !reservedFolders[folderName] {
-			routes = append(routes, proxy.Route{
+			folderRoute := proxy.Route{
 				Subdomain:   folderName,
 				Endpoint:    dashboardEndpoint,
-				Source:      discovery.RouteSourceProcess,
 				HasWildcard: true,
 				FolderGroup: folderName,
+			}
+			routes = append(routes, folderRoute)
+			backends = append(backends, dashboard.Backend{
+				Route:  folderRoute,
+				Source: discovery.RouteSourceProcess,
 			})
 		}
 	}
@@ -157,43 +167,49 @@ func (r *RouteRegistry) getRoutesLocked() []proxy.Route {
 			Subdomain: svc.Subdomain,
 			Endpoint:  svc.Endpoint,
 			TCPPort:   svc.TCPPort,
-			Source:    svc.Source,
-		}
-
-		if svc.Process != nil {
-			route.PID = svc.Process.PID
-			route.Cwd = svc.Process.Cwd
-			route.Disabled = svc.Process.Disabled
-			route.NeedsCustomMapping = svc.Process.NeedsCustomMapping
-			route.IsDocker = svc.Process.IsDocker
-			route.TopLevelFolder = svc.Process.TopLevelFolder
-			route.RelativePath = svc.Process.RelativePath
-			topFolder := svc.Process.TopLevelFolder
-			if topFolder != "" && len(r.folderGroups[topFolder]) >= 2 && !reservedFolders[topFolder] {
-				route.FolderGroup = topFolder
-			}
-		}
-
-		if svc.Docker != nil {
-			route.DockerContainerID = svc.Docker.ID
-			route.DockerHasAutoName = !svc.Docker.HasCustomName
-			route.DockerPorts = svc.Docker.Ports
 		}
 
 		if svc.Service != nil {
 			route.ServiceProtocol = svc.Service.Protocol
 		}
 
+		backend := dashboard.Backend{
+			Route:  route,
+			Source: svc.Source,
+		}
+
+		if svc.Process != nil {
+			backend.PID = svc.Process.PID
+			backend.Cwd = svc.Process.Cwd
+			backend.Disabled = svc.Process.Disabled
+			backend.NeedsCustomMapping = svc.Process.NeedsCustomMapping
+			backend.IsDocker = svc.Process.IsDocker
+			backend.TopLevelFolder = svc.Process.TopLevelFolder
+			backend.RelativePath = svc.Process.RelativePath
+			topFolder := svc.Process.TopLevelFolder
+			if topFolder != "" && len(r.folderGroups[topFolder]) >= 2 && !reservedFolders[topFolder] {
+				route.FolderGroup = topFolder
+				backend.FolderGroup = topFolder
+			}
+		}
+
+		if svc.Docker != nil {
+			backend.DockerContainerID = svc.Docker.ID
+			backend.DockerHasAutoName = !svc.Docker.HasCustomName
+			backend.DockerPorts = svc.Docker.Ports
+		}
+
 		routes = append(routes, route)
+		backends = append(backends, backend)
 	}
 
-	return routes
+	return routes, backends
 }
 
 func (r *RouteRegistry) notifyChange() {
 	if r.onChange != nil {
-		routes := r.getRoutesLocked()
-		r.onChange(routes)
+		routes, backends := r.getRoutesLocked()
+		r.onChange(routes, backends)
 	}
 }
 

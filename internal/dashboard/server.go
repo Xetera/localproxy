@@ -1,4 +1,4 @@
-package proxy
+package dashboard
 
 import (
 	"bufio"
@@ -19,7 +19,6 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/xetera/localproxy/internal/discovery"
-	"github.com/xetera/localproxy/internal/envoy"
 )
 
 const (
@@ -29,7 +28,7 @@ const (
 func getTemplatesPath() string {
 	paths := []string{
 		"templates",
-		"internal/proxy/templates",
+		"internal/dashboard/templates",
 	}
 
 	for _, p := range paths {
@@ -48,7 +47,7 @@ func getTemplatesPath() string {
 		}
 	}
 
-	return "internal/proxy/templates"
+	return "internal/dashboard/templates"
 }
 
 type UnroutedContainer struct {
@@ -89,29 +88,26 @@ type StoreInterface interface {
 
 type DashboardServer struct {
 	server             *http.Server
-	routes             map[string]Route
-	routesMu           sync.RWMutex
+	backends           map[string]Backend
+	backendsMu         sync.RWMutex
 	logManager         *LogManager
 	basePaths          []string
 	unroutedContainers []UnroutedContainer
-	statsScraper       *envoy.StatsScraper
 	registry           RegistryInterface
 	store              StoreInterface
 }
 
-func NewDashboardServer(basePaths []string, traceProcessLogs bool, statsScraper *envoy.StatsScraper) *DashboardServer {
+func NewDashboardServer(basePaths []string, traceProcessLogs bool) *DashboardServer {
 	s := &DashboardServer{
-		routes:       make(map[string]Route),
-		logManager:   NewLogManager(traceProcessLogs),
-		basePaths:    basePaths,
-		statsScraper: statsScraper,
+		backends:   make(map[string]Backend),
+		logManager: NewLogManager(traceProcessLogs),
+		basePaths:  basePaths,
 	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleRoot)
 	mux.HandleFunc("/logs", s.serveLogs)
 	mux.HandleFunc("/api/logs-preview", s.serveLogsPreview)
-	mux.HandleFunc("/api/stats", s.serveStats)
 	mux.HandleFunc("/api/subdomain-mapping", s.handleSubdomainMapping)
 
 	s.server = &http.Server{
@@ -211,21 +207,21 @@ func (s *DashboardServer) serve404(w http.ResponseWriter, r *http.Request, host 
 	})
 }
 
-func (s *DashboardServer) UpdateRoutes(routes []Route) {
-	s.routesMu.Lock()
-	defer s.routesMu.Unlock()
+func (s *DashboardServer) UpdateBackends(backends []Backend) {
+	s.backendsMu.Lock()
+	defer s.backendsMu.Unlock()
 
-	s.routes = make(map[string]Route)
-	for _, r := range routes {
-		s.routes[r.Subdomain] = r
+	s.backends = make(map[string]Backend)
+	for _, b := range backends {
+		s.backends[b.Subdomain] = b
 	}
 
-	go s.logManager.UpdateRoutes(routes)
+	go s.logManager.UpdateBackends(backends)
 }
 
 func (s *DashboardServer) UpdateUnroutedContainers(containers []UnroutedContainer) {
-	s.routesMu.Lock()
-	defer s.routesMu.Unlock()
+	s.backendsMu.Lock()
+	defer s.backendsMu.Unlock()
 	s.unroutedContainers = containers
 }
 
@@ -246,8 +242,8 @@ func (s *DashboardServer) Stop() error {
 	return s.server.Shutdown(ctx)
 }
 
-type RouteWithLogs struct {
-	Route
+type BackendWithLogs struct {
+	Backend
 	RecentLogs  []string
 	DisplayPath string
 }
@@ -255,24 +251,7 @@ type RouteWithLogs struct {
 type ProcessGroup struct {
 	Cwd        string
 	DisplayCwd string
-	Routes     []RouteWithLogs
-}
-
-type FormattedStats struct {
-	RxFormatted           string
-	TxFormatted           string
-	RxRateFormatted       string
-	TxRateFormatted       string
-	RequestsFormatted     string
-	RequestsRateFormatted string
-	HTTP2xxFormatted      string
-	HTTP4xxFormatted      string
-	HTTP5xxFormatted      string
-	HTTP1Formatted        string
-	HTTP2Formatted        string
-	HTTP3Formatted        string
-	ActiveConnections     uint64
-	DisconnectsFormatted  string
+	Backends   []BackendWithLogs
 }
 
 func formatBytes(bytes uint64) string {
@@ -322,85 +301,85 @@ func (s *DashboardServer) serveDashboard(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	s.routesMu.RLock()
+	s.backendsMu.RLock()
 	basePaths := s.basePaths
 	unroutedContainers := s.unroutedContainers
-	var enabledRoutes, disabledRoutes, wellKnownRoutes []RouteWithLogs
-	for _, route := range s.routes {
-		routeWithLogs := RouteWithLogs{
-			Route:      route,
+	var enabledBackends, disabledBackends, wellKnownBackends []BackendWithLogs
+	for _, backend := range s.backends {
+		backendWithLogs := BackendWithLogs{
+			Backend:    backend,
 			RecentLogs: []string{},
 		}
-		if route.Source == discovery.RouteSourceDocker && route.DockerContainerID != "" {
-			buffer := s.logManager.GetBufferByContainerID(route.DockerContainerID)
-			routeWithLogs.RecentLogs = buffer.GetLines()
-		} else if route.PID > 0 {
-			buffer := s.logManager.GetBufferByPID(route.PID)
-			routeWithLogs.RecentLogs = buffer.GetLines()
+		if backend.Source == discovery.RouteSourceDocker && backend.DockerContainerID != "" {
+			buffer := s.logManager.GetBufferByContainerID(backend.DockerContainerID)
+			backendWithLogs.RecentLogs = buffer.GetLines()
+		} else if backend.PID > 0 {
+			buffer := s.logManager.GetBufferByPID(backend.PID)
+			backendWithLogs.RecentLogs = buffer.GetLines()
 		}
 
-		if route.Disabled {
-			disabledRoutes = append(disabledRoutes, routeWithLogs)
-		} else if route.Source == discovery.RouteSourceWellKnown {
-			wellKnownRoutes = append(wellKnownRoutes, routeWithLogs)
+		if backend.Disabled {
+			disabledBackends = append(disabledBackends, backendWithLogs)
+		} else if backend.Source == discovery.RouteSourceWellKnown {
+			wellKnownBackends = append(wellKnownBackends, backendWithLogs)
 		} else {
-			enabledRoutes = append(enabledRoutes, routeWithLogs)
+			enabledBackends = append(enabledBackends, backendWithLogs)
 		}
 	}
-	s.routesMu.RUnlock()
+	s.backendsMu.RUnlock()
 
-	var dockerRoutes, processRoutes []RouteWithLogs
-	for _, r := range enabledRoutes {
-		if r.Source == discovery.RouteSourceDocker {
-			dockerRoutes = append(dockerRoutes, r)
+	var dockerBackends, processBackends []BackendWithLogs
+	for _, b := range enabledBackends {
+		if b.Source == discovery.RouteSourceDocker {
+			dockerBackends = append(dockerBackends, b)
 		} else {
-			processRoutes = append(processRoutes, r)
+			processBackends = append(processBackends, b)
 		}
 	}
-	for _, r := range disabledRoutes {
-		if r.Source == discovery.RouteSourceProcess {
-			processRoutes = append(processRoutes, r)
-		}
-	}
-
-	sort.Slice(dockerRoutes, func(i, j int) bool {
-		return dockerRoutes[i].Subdomain < dockerRoutes[j].Subdomain
-	})
-	sort.Slice(processRoutes, func(i, j int) bool {
-		return processRoutes[i].Subdomain < processRoutes[j].Subdomain
-	})
-	sort.Slice(disabledRoutes, func(i, j int) bool {
-		return disabledRoutes[i].Subdomain < disabledRoutes[j].Subdomain
-	})
-	var otherDisabledRoutes []RouteWithLogs
-	for _, r := range disabledRoutes {
-		if r.Source != discovery.RouteSourceProcess {
-			otherDisabledRoutes = append(otherDisabledRoutes, r)
+	for _, b := range disabledBackends {
+		if b.Source == discovery.RouteSourceProcess {
+			processBackends = append(processBackends, b)
 		}
 	}
 
-	for i := range processRoutes {
-		processRoutes[i].DisplayPath = trimBasePath(processRoutes[i].Cwd, basePaths)
+	sort.Slice(dockerBackends, func(i, j int) bool {
+		return dockerBackends[i].Subdomain < dockerBackends[j].Subdomain
+	})
+	sort.Slice(processBackends, func(i, j int) bool {
+		return processBackends[i].Subdomain < processBackends[j].Subdomain
+	})
+	sort.Slice(disabledBackends, func(i, j int) bool {
+		return disabledBackends[i].Subdomain < disabledBackends[j].Subdomain
+	})
+	var otherDisabledBackends []BackendWithLogs
+	for _, b := range disabledBackends {
+		if b.Source != discovery.RouteSourceProcess {
+			otherDisabledBackends = append(otherDisabledBackends, b)
+		}
 	}
 
-	sort.Slice(wellKnownRoutes, func(i, j int) bool {
-		return wellKnownRoutes[i].Subdomain < wellKnownRoutes[j].Subdomain
+	for i := range processBackends {
+		processBackends[i].DisplayPath = trimBasePath(processBackends[i].Cwd, basePaths)
+	}
+
+	sort.Slice(wellKnownBackends, func(i, j int) bool {
+		return wellKnownBackends[i].Subdomain < wellKnownBackends[j].Subdomain
 	})
 
-	type routeWithDisplayCwd struct {
-		route      RouteWithLogs
+	type backendWithDisplayCwd struct {
+		backend    BackendWithLogs
 		displayCwd string
 	}
-	var processRoutesWithDisplay []routeWithDisplayCwd
+	var processBackendsWithDisplay []backendWithDisplayCwd
 	displayCwdCounts := make(map[string]int)
-	for _, r := range processRoutes {
-		trimmed := trimBasePath(r.Cwd, basePaths)
+	for _, b := range processBackends {
+		trimmed := trimBasePath(b.Cwd, basePaths)
 		displayCwd := trimmed
 		if idx := strings.Index(trimmed, "/"); idx != -1 {
 			displayCwd = trimmed[:idx]
 		}
-		processRoutesWithDisplay = append(processRoutesWithDisplay, routeWithDisplayCwd{
-			route:      r,
+		processBackendsWithDisplay = append(processBackendsWithDisplay, backendWithDisplayCwd{
+			backend:    b,
 			displayCwd: displayCwd,
 		})
 		if displayCwd != "" {
@@ -410,26 +389,26 @@ func (s *DashboardServer) serveDashboard(w http.ResponseWriter, r *http.Request)
 
 	var processGroups []ProcessGroup
 	groupedDisplayCwds := make(map[string]bool)
-	var ungroupedProcesses []RouteWithLogs
+	var ungroupedProcesses []BackendWithLogs
 
-	for _, r := range processRoutesWithDisplay {
-		if r.displayCwd != "" && displayCwdCounts[r.displayCwd] > 1 {
-			if !groupedDisplayCwds[r.displayCwd] {
-				groupedDisplayCwds[r.displayCwd] = true
-				var groupRoutes []RouteWithLogs
-				for _, pr := range processRoutesWithDisplay {
-					if pr.displayCwd == r.displayCwd {
-						groupRoutes = append(groupRoutes, pr.route)
+	for _, b := range processBackendsWithDisplay {
+		if b.displayCwd != "" && displayCwdCounts[b.displayCwd] > 1 {
+			if !groupedDisplayCwds[b.displayCwd] {
+				groupedDisplayCwds[b.displayCwd] = true
+				var groupBackends []BackendWithLogs
+				for _, pb := range processBackendsWithDisplay {
+					if pb.displayCwd == b.displayCwd {
+						groupBackends = append(groupBackends, pb.backend)
 					}
 				}
 				processGroups = append(processGroups, ProcessGroup{
-					Cwd:        r.route.Cwd,
-					DisplayCwd: r.displayCwd,
-					Routes:     groupRoutes,
+					Cwd:        b.backend.Cwd,
+					DisplayCwd: b.displayCwd,
+					Backends:   groupBackends,
 				})
 			}
 		} else {
-			ungroupedProcesses = append(ungroupedProcesses, r.route)
+			ungroupedProcesses = append(ungroupedProcesses, b.backend)
 		}
 	}
 
@@ -438,8 +417,8 @@ func (s *DashboardServer) serveDashboard(w http.ResponseWriter, r *http.Request)
 	})
 
 	activeWellKnown := make(map[string]bool)
-	for _, r := range wellKnownRoutes {
-		activeWellKnown[r.Subdomain] = true
+	for _, b := range wellKnownBackends {
+		activeWellKnown[b.Subdomain] = true
 	}
 
 	allWellKnown := discovery.GetAllWellKnownPorts()
@@ -452,12 +431,12 @@ func (s *DashboardServer) serveDashboard(w http.ResponseWriter, r *http.Request)
 
 	selectedSubdomain := r.URL.Query().Get("service")
 
-	var selectedRoute *RouteWithLogs
+	var selectedBackend *BackendWithLogs
 	var selectedLogs []string
 
-	allRoutes := append(append(append([]RouteWithLogs{}, dockerRoutes...), ungroupedProcesses...), wellKnownRoutes...)
+	allBackends := append(append(append([]BackendWithLogs{}, dockerBackends...), ungroupedProcesses...), wellKnownBackends...)
 	for _, g := range processGroups {
-		allRoutes = append(allRoutes, g.Routes...)
+		allBackends = append(allBackends, g.Backends...)
 	}
 
 	type PortRepr struct {
@@ -467,18 +446,18 @@ func (s *DashboardServer) serveDashboard(w http.ResponseWriter, r *http.Request)
 	}
 
 	var portRepr []PortRepr
-	for i := range allRoutes {
-		if allRoutes[i].Subdomain == selectedSubdomain {
-			selectedRoute = &allRoutes[i]
-			selectedLogs = allRoutes[i].RecentLogs
-			if len(selectedRoute.DockerPorts) > 0 {
+	for i := range allBackends {
+		if allBackends[i].Subdomain == selectedSubdomain {
+			selectedBackend = &allBackends[i]
+			selectedLogs = allBackends[i].RecentLogs
+			if len(selectedBackend.DockerPorts) > 0 {
 				type portInfo struct {
 					udp             bool
 					tcp             bool
 					serviceProtocol string
 				}
 				portsByNumber := make(map[uint16]*portInfo)
-				for _, p := range selectedRoute.DockerPorts {
+				for _, p := range selectedBackend.DockerPorts {
 					port := p.Endpoint.Port()
 					if portsByNumber[port] == nil {
 						portsByNumber[port] = &portInfo{}
@@ -510,49 +489,6 @@ func (s *DashboardServer) serveDashboard(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	selectedStats := FormattedStats{
-		RxFormatted:           "0",
-		TxFormatted:           "0",
-		RxRateFormatted:       "0",
-		TxRateFormatted:       "0",
-		RequestsFormatted:     "0",
-		RequestsRateFormatted: "0.0",
-		HTTP2xxFormatted:      "0",
-		HTTP4xxFormatted:      "0",
-		HTTP5xxFormatted:      "0",
-		HTTP1Formatted:        "0",
-		HTTP2Formatted:        "0",
-		HTTP3Formatted:        "0",
-		ActiveConnections:     0,
-		DisconnectsFormatted:  "0",
-	}
-	if selectedRoute != nil && s.statsScraper != nil {
-		clusterName := selectedRoute.Subdomain
-		if clusterName == "" {
-			clusterName = "cluster_root"
-		}
-		allStats := s.statsScraper.GetClusterStats()
-		globalStats := s.statsScraper.GetGlobalStats()
-		if stats, ok := allStats[clusterName]; ok {
-			selectedStats = FormattedStats{
-				RxFormatted:           formatBytes(stats.TCPBytesReceived),
-				TxFormatted:           formatBytes(stats.TCPBytesSent),
-				RxRateFormatted:       formatRate(stats.TCPBytesReceivedRate),
-				TxRateFormatted:       formatRate(stats.TCPBytesSentRate),
-				RequestsFormatted:     formatNumber(stats.HTTPRequestsTotal),
-				RequestsRateFormatted: fmt.Sprintf("%.1f", stats.HTTPRequestsRate),
-				HTTP2xxFormatted:      formatNumber(stats.HTTP2xx),
-				HTTP4xxFormatted:      formatNumber(stats.HTTP4xx),
-				HTTP5xxFormatted:      formatNumber(stats.HTTP5xx),
-				HTTP1Formatted:        formatNumber(globalStats.DownstreamHTTP1),
-				HTTP2Formatted:        formatNumber(globalStats.DownstreamHTTP2),
-				HTTP3Formatted:        formatNumber(globalStats.DownstreamHTTP3),
-				ActiveConnections:     stats.ActiveConnections,
-				DisconnectsFormatted:  formatNumber(stats.DisconnectsLocal + stats.DisconnectsRemote),
-			}
-		}
-	}
-
 	templatesPath := getTemplatesPath()
 	funcMap := template.FuncMap{
 		"add":  func(a, b int) int { return a + b },
@@ -563,41 +499,40 @@ func (s *DashboardServer) serveDashboard(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := tmpl.Execute(w, map[string]any{
 		"TraceProcessLogs":   s.logManager.traceProcessLogs,
-		"EnabledRoutes":      enabledRoutes,
-		"DockerRoutes":       dockerRoutes,
+		"EnabledBackends":    enabledBackends,
+		"DockerBackends":     dockerBackends,
 		"ProcessGroups":      processGroups,
 		"UngroupedProcesses": ungroupedProcesses,
-		"DisabledRoutes":     otherDisabledRoutes,
-		"WellKnownRoutes":    wellKnownRoutes,
+		"DisabledBackends":   otherDisabledBackends,
+		"WellKnownBackends":  wellKnownBackends,
 		"InactiveWellKnown":  inactiveWellKnown,
 		"UnroutedContainers": unroutedContainers,
 		"SelectedSubdomain":  selectedSubdomain,
-		"SelectedRoute":      selectedRoute,
+		"SelectedBackend":    selectedBackend,
 		"SelectedLogs":       selectedLogs,
 		"SelectedPorts":      portRepr,
-		"SelectedStats":      selectedStats,
 	}); err != nil {
 		log.Printf("template error: %v", err)
 	}
 }
 
 func (s *DashboardServer) serveLogsPreview(w http.ResponseWriter, r *http.Request) {
-	s.routesMu.RLock()
+	s.backendsMu.RLock()
 	logsMap := make(map[string][]string)
-	for _, route := range s.routes {
+	for _, backend := range s.backends {
 		var buffer *LogBuffer
-		if route.Source == discovery.RouteSourceDocker && route.DockerContainerID != "" {
-			buffer = s.logManager.GetBufferByContainerID(route.DockerContainerID)
-		} else if route.PID > 0 {
-			buffer = s.logManager.GetBufferByPID(route.PID)
+		if backend.Source == discovery.RouteSourceDocker && backend.DockerContainerID != "" {
+			buffer = s.logManager.GetBufferByContainerID(backend.DockerContainerID)
+		} else if backend.PID > 0 {
+			buffer = s.logManager.GetBufferByPID(backend.PID)
 		}
 
 		if buffer != nil {
 			logs := buffer.GetLines()
-			logsMap[route.Subdomain] = logs
+			logsMap[backend.Subdomain] = logs
 		}
 	}
-	s.routesMu.RUnlock()
+	s.backendsMu.RUnlock()
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(logsMap)
@@ -610,9 +545,9 @@ func (s *DashboardServer) serveLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.routesMu.RLock()
-	route, exists := s.routes[subdomain]
-	s.routesMu.RUnlock()
+	s.backendsMu.RLock()
+	backend, exists := s.backends[subdomain]
+	s.backendsMu.RUnlock()
 
 	if !exists {
 		http.Error(w, "service not found", http.StatusNotFound)
@@ -634,14 +569,13 @@ func (s *DashboardServer) serveLogs(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	tmpl.Execute(w, map[string]interface{}{
-		"Subdomain": route.Subdomain,
-		"PID":       route.PID,
-		"Port":      route.Endpoint.Port(),
-		"Cwd":       route.Cwd,
+		"Subdomain": backend.Subdomain,
+		"PID":       backend.PID,
+		"Port":      backend.Endpoint.Port(),
+		"Cwd":       backend.Cwd,
 	})
 }
 
-// TODO: use the existing log manager functionality for this.
 func (s *DashboardServer) streamLogs(w http.ResponseWriter, r *http.Request, subdomain string) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -649,9 +583,9 @@ func (s *DashboardServer) streamLogs(w http.ResponseWriter, r *http.Request, sub
 		return
 	}
 
-	s.routesMu.RLock()
-	route, exists := s.routes[subdomain]
-	s.routesMu.RUnlock()
+	s.backendsMu.RLock()
+	backend, exists := s.backends[subdomain]
+	s.backendsMu.RUnlock()
 
 	if !exists {
 		http.Error(w, "service not found", http.StatusNotFound)
@@ -666,7 +600,7 @@ func (s *DashboardServer) streamLogs(w http.ResponseWriter, r *http.Request, sub
 	var reader io.ReadCloser
 	var err error
 
-	if route.Source == discovery.RouteSourceDocker && route.DockerContainerID != "" {
+	if backend.Source == discovery.RouteSourceDocker && backend.DockerContainerID != "" {
 		if s.logManager.dockerClient == nil {
 			http.Error(w, "docker client not available", http.StatusInternalServerError)
 			return
@@ -679,7 +613,7 @@ func (s *DashboardServer) streamLogs(w http.ResponseWriter, r *http.Request, sub
 			Tail:       "10",
 		}
 
-		reader, err = s.logManager.dockerClient.ContainerLogs(r.Context(), route.DockerContainerID, options)
+		reader, err = s.logManager.dockerClient.ContainerLogs(r.Context(), backend.DockerContainerID, options)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("failed to get docker logs: %v", err), http.StatusInternalServerError)
 			return
@@ -694,7 +628,7 @@ func (s *DashboardServer) streamLogs(w http.ResponseWriter, r *http.Request, sub
 	scanner := bufio.NewScanner(reader)
 	for scanner.Scan() {
 		line := scanner.Text()
-		if route.Source == discovery.RouteSourceDocker && len(line) > 8 {
+		if backend.Source == discovery.RouteSourceDocker && len(line) > 8 {
 			line = line[8:]
 		}
 		line = strings.TrimSpace(line)
@@ -707,18 +641,6 @@ func (s *DashboardServer) streamLogs(w http.ResponseWriter, r *http.Request, sub
 	if err := scanner.Err(); err != nil {
 		log.Printf("log stream error: %v", err)
 	}
-}
-
-func (s *DashboardServer) serveStats(w http.ResponseWriter, r *http.Request) {
-	if s.statsScraper == nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte("{}"))
-		return
-	}
-
-	stats := s.statsScraper.GetClusterStats()
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(stats)
 }
 
 func (s *DashboardServer) serveCaptivePortal(w http.ResponseWriter, r *http.Request, folder string) {

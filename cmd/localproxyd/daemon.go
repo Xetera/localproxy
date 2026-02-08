@@ -10,6 +10,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/xetera/localproxy/internal/dashboard"
 	"github.com/xetera/localproxy/internal/discovery"
 	"github.com/xetera/localproxy/internal/hosts"
 	"github.com/xetera/localproxy/internal/notification"
@@ -28,10 +29,10 @@ type Daemon struct {
 	config  Config
 	dataDir string
 
-	hostsMgr      *hosts.Manager
-	routeRegistry *registry.RouteRegistry
+	hostsMgr        *hosts.Manager
+	routeRegistry   *registry.RouteRegistry
 	store           *registry.Store
-	dashboardServer *proxy.DashboardServer
+	dashboardServer *dashboard.DashboardServer
 	processWatcher  *discovery.ProcessWatcher
 	dockerWatcher   *discovery.DockerWatcher
 	notifier        *notification.Notifier
@@ -82,7 +83,7 @@ func (d *Daemon) Start() error {
 		return err
 	}
 
-	log.Printf("dashboard server listening on 127.0.0.1:%d", proxy.ServerPort)
+	log.Printf("dashboard server listening on 127.0.0.1:%d", dashboard.ServerPort)
 
 	return nil
 }
@@ -126,7 +127,7 @@ func (d *Daemon) initRouting() error {
 	d.store = store
 
 	basePaths := d.getBasePaths()
-	d.dashboardServer = proxy.NewDashboardServer(basePaths, d.config.TraceProcessLogs, nil)
+	d.dashboardServer = dashboard.NewDashboardServer(basePaths, d.config.TraceProcessLogs)
 	d.routeRegistry = registry.NewRouteRegistry(d.onRoutesChanged, d.store)
 
 	d.dashboardServer.SetRegistry(d.routeRegistry)
@@ -187,12 +188,12 @@ func (d *Daemon) getBasePaths() []string {
 	return []string{defaultBasePath}
 }
 
-func (d *Daemon) onRoutesChanged(routes []proxy.Route) {
-	d.dashboardServer.UpdateRoutes(routes)
+func (d *Daemon) onRoutesChanged(routes []proxy.Route, backends []dashboard.Backend) {
+	d.dashboardServer.UpdateBackends(backends)
 
 	var subdomains []string
-	for _, r := range routes {
-		if r.Disabled {
+	for i, r := range routes {
+		if backends[i].Disabled {
 			continue
 		}
 		subdomains = append(subdomains, r.Subdomain)
@@ -257,9 +258,9 @@ func (d *Daemon) onDockerHealthy(svc discovery.DiscoveredService) {
 
 func (d *Daemon) onUnroutedContainersChanged(containers []discovery.UnroutedContainer) {
 	log.Printf("unrouted docker containers: %d", len(containers))
-	unrouted := make([]proxy.UnroutedContainer, len(containers))
+	unrouted := make([]dashboard.UnroutedContainer, len(containers))
 	for i, c := range containers {
-		unrouted[i] = proxy.UnroutedContainer{
+		unrouted[i] = dashboard.UnroutedContainer{
 			ID:     c.ID,
 			Name:   c.Name,
 			Reason: c.Reason,

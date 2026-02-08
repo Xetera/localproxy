@@ -11,30 +11,41 @@ curl https://coolproject.localhost
 
 ![](./showcase.jpg)
 
-I hate having to remember random port numbers.
-
-Localproxy solves this problem for me. It runs envoy on port 80 and 443 with a self-signed certificate using [mkcert](https://github.com/FiloSottile/mkcert), and auto-discovers targets from both docker using `EXPOSE` fields and [labels](#docker-example-with-labels), and local processes listening to ports running directly under a given "projects" folder. To allow for non-browser tools to also function, the current running processes are also appended to `/etc/hosts` to make sure they point to 127.0.0.1, and are not resolved through external DNS. This is not already the default behavior on macos for some reason.
+I hate having to remember random port numbers. Localproxy solves this problem for me. It runs an embedded caddy server on port 80 and 443 with a self-signed certificate, and auto-discovers targets from both docker using `EXPOSE` fields and [labels](#docker-example-with-labels), and local processes listening to ports running directly under a given "projects" folder.
 
 Localproxy supports proxying http(s), http/2, http/3 (QUIC) and TCP connections. If there's more than one service running on the same port (ex: 2 postgres databases listening on port 5432), the TCP connections MUST use TLS to allow the proxy to determine the target domain. Otherwise that information is missing without a layer 7 protocol involved (ex: redis with `--tls --sni` and postgres with `?sslnegotiation=direct&sslmode=require`)
 
 Certain well-known ports on your computer are also checked to detect software you may have running locally outside your regular "projects" folder like syncthing, to also proxy connections there as well.
 
-This project is currently WIP, so you'll have to install both `mkcer` and `envoy` and build the project from source using the following command. I've only tested this on macos so far but I plan for it to support any platform/architecture envoy supports.
+---
+
+Sadly, the project requires root privileges on macos because:
+
+1. Unlike Linux, On MacOS, docker runs on top of a Linux VM. Which makes reaching into docker ports impossible without having root access. There's really no good workaround for this that I know of.
+2. MacOS for whatever reason does not automatically map `*.localhost` to 127.0.0.1. To allow this mapping, localproxy reaches into `/etc/hosts` to add entries just because it's the simplest alternative since we already need root.
+3. [There's a bug that prevents listening to privileged ports on specific interfaces without root](https://news.ycombinator.com/item?id=18302380). That's right, you can listen to port 80 on `0.0.0.0` but not `127.0.0.1`.
+
+If you don't need docker integration in macos, you can run without root after doing a small setup to allow resolving localhost and internal tlds.
+
+```
+brew install dnsmasq
+echo 'address=/.localhost/127.0.0.1' >> $(brew --prefix)/etc/dnsmasq.conf
+echo 'address=/.internal/127.0.0.1' >> $(brew --prefix)/etc/dnsmasq.conf
+sudo brew services start dnsmasq
+```
 
 ```sh
 sudo CGO_ENABLED=0 go run ./cmd/localproxyd --watch ~/myprojects
 ```
 
-Then navigate to the dashboard https://proxy.localhost
+Then navigate to the dashboard https://localhost
 
 #### Flags
 
 - `--watch` Adds a folder to watch for processes. Local process watching is disabled if no folders are watched.
 - `--https-redirect` Force https redirects for all created endpoints (default: false)
-- `--log-level` Log level for the envoy server. `error`, `info`, `debug` (default: info)
+- `--log-level` Log level for the caddy server. `error`, `info`, `debug` (default: info)
 - `--trace-process-logs` Show logs from external processes on the dashboard using dtrace on macOS. Requires disabling SIP. This WILL eventually lock up your system badly enough for you to hold down the power button for a restart [unless you're on Tahoe](https://news.ycombinator.com/item?id=45974681) (default: false)
-- `--xds-port` The port to run the xDS server (default: 18000)
-- `--envoy-admin-port` The port to run the admin interface, including statistics, for envoy (default: 9901)
 
 ### Local process example
 

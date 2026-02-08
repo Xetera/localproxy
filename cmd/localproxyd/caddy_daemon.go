@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/netip"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -13,8 +14,8 @@ import (
 
 	"github.com/caddyserver/caddy/v2"
 	_ "github.com/caddyserver/caddy/v2/modules/standard"
-	caddycfg "github.com/xetera/localproxy/caddy"
 	"github.com/xetera/localproxy/internal/certs"
+	"github.com/xetera/localproxy/internal/dashboard"
 	"github.com/xetera/localproxy/internal/discovery"
 	"github.com/xetera/localproxy/internal/hosts"
 	"github.com/xetera/localproxy/internal/notification"
@@ -22,12 +23,13 @@ import (
 	"github.com/xetera/localproxy/internal/registry"
 )
 
-const adminSocket = "/tmp/caddy-admin.sock"
+var adminSocket = filepath.Join(os.TempDir(), fmt.Sprintf("caddy-admin-%d.sock", os.Getuid()))
 
 type CaddyConfig struct {
 	WatchPaths       []string
 	LogLevel         string
 	TraceProcessLogs bool
+	HTTPSRedirect    bool
 }
 
 type CaddyDaemon struct {
@@ -38,7 +40,7 @@ type CaddyDaemon struct {
 	certMgr         *certs.CertManager
 	routeRegistry   *registry.RouteRegistry
 	store           *registry.Store
-	dashboardServer *proxy.DashboardServer
+	dashboardServer *dashboard.DashboardServer
 	processWatcher  *discovery.ProcessWatcher
 	dockerWatcher   *discovery.DockerWatcher
 	notifier        *notification.Notifier
@@ -73,9 +75,9 @@ func NewCaddyDaemon(cfg CaddyConfig) (*CaddyDaemon, error) {
 }
 
 func (d *CaddyDaemon) Start() error {
-	if err := d.initHosts(); err != nil {
-		log.Printf("warning: hosts manager disabled: %v", err)
-	}
+	// if err := d.initHosts(); err != nil {
+	// 	log.Printf("warning: hosts manager disabled: %v", err)
+	// }
 
 	if err := d.initCerts(); err != nil {
 		return err
@@ -93,7 +95,7 @@ func (d *CaddyDaemon) Start() error {
 		return err
 	}
 
-	log.Printf("dashboard server listening on 127.0.0.1:%d", proxy.ServerPort)
+	log.Printf("dashboard server listening on 127.0.0.1:%d", dashboard.ServerPort)
 
 	if err := d.startCaddy(); err != nil {
 		return err
@@ -148,7 +150,7 @@ func (d *CaddyDaemon) initRouting() error {
 	d.store = store
 
 	basePaths := d.getBasePaths()
-	d.dashboardServer = proxy.NewDashboardServer(basePaths, d.config.TraceProcessLogs, nil)
+	d.dashboardServer = dashboard.NewDashboardServer(basePaths, d.config.TraceProcessLogs)
 	d.routeRegistry = registry.NewRouteRegistry(d.onRoutesChanged, d.store)
 
 	d.dashboardServer.SetRegistry(d.routeRegistry)
@@ -201,18 +203,18 @@ func (d *CaddyDaemon) initWatchers() error {
 
 func (d *CaddyDaemon) startCaddy() error {
 	certPath, keyPath, _ := d.certMgr.GetCert("localhost")
+	dashboardEndpoint := netip.AddrPortFrom(netip.AddrFrom4([4]byte{127, 0, 0, 1}), dashboard.ServerPort)
 
-	routes := []caddycfg.Route{
+	routes := []proxy.Route{
 		{
-			Subdomain:  "",
-			TargetIP:   "127.0.0.1",
-			TargetPort: int(proxy.ServerPort),
-			CertPath:   certPath,
-			KeyPath:    keyPath,
+			Subdomain: "",
+			Endpoint:  dashboardEndpoint,
+			CertPath:  certPath,
+			KeyPath:   keyPath,
 		},
 	}
 
-	cfg, err := caddycfg.BuildConfig(routes, adminSocket)
+	cfg, err := proxy.BuildFullCaddyConfig(routes, adminSocket, d.config.HTTPSRedirect)
 	if err != nil {
 		return fmt.Errorf("failed to build caddy config: %w", err)
 	}
@@ -230,23 +232,24 @@ func (d *CaddyDaemon) getBasePaths() []string {
 	return []string{defaultBasePath}
 }
 
-func (d *CaddyDaemon) onRoutesChanged(routes []proxy.Route) {
-	d.dashboardServer.UpdateRoutes(routes)
+func (d *CaddyDaemon) onRoutesChanged(routes []proxy.Route, backends []dashboard.Backend) {
+	d.dashboardServer.UpdateBackends(backends)
 
 	certPath, keyPath, _ := d.certMgr.GetCert("localhost")
-	caddyRoutes := []caddycfg.Route{
+	dashboardEndpoint := netip.AddrPortFrom(netip.AddrFrom4([4]byte{127, 0, 0, 1}), dashboard.ServerPort)
+	caddyRoutes := []proxy.Route{
 		{
-			Subdomain:  "",
-			TargetIP:   "127.0.0.1",
-			TargetPort: int(proxy.ServerPort),
-			CertPath:   certPath,
-			KeyPath:    keyPath,
+			Subdomain: "",
+			Endpoint:  dashboardEndpoint,
+			CertPath:  certPath,
+			KeyPath:   keyPath,
 		},
 	}
 	var subdomains []string
 
-	for _, r := range routes {
-		if r.Disabled {
+	for i, r := range routes {
+		backend := backends[i]
+		if backend.Disabled {
 			continue
 		}
 
@@ -276,18 +279,19 @@ func (d *CaddyDaemon) onRoutesChanged(routes []proxy.Route) {
 			cPath, kPath, _ = d.certMgr.GetCert(certKey)
 		}
 
-		caddyRoute := caddycfg.Route{
-			Subdomain:  r.Subdomain,
-			TargetIP:   r.Endpoint.Addr().String(),
-			TargetPort: int(r.Endpoint.Port()),
-			CertPath:   cPath,
-			KeyPath:    kPath,
+		caddyRoute := proxy.Route{
+			Subdomain:   r.Subdomain,
+			Endpoint:    r.Endpoint,
+			CertPath:    cPath,
+			KeyPath:     kPath,
+			HasWildcard: r.HasWildcard,
+			FolderGroup: r.FolderGroup,
 		}
 		caddyRoutes = append(caddyRoutes, caddyRoute)
 		subdomains = append(subdomains, r.Subdomain)
 	}
 
-	cfg, err := caddycfg.BuildConfig(caddyRoutes, adminSocket)
+	cfg, err := proxy.BuildFullCaddyConfig(caddyRoutes, adminSocket, d.config.HTTPSRedirect)
 	if err != nil {
 		log.Printf("failed to build caddy config: %v", err)
 		return
@@ -363,9 +367,9 @@ func (d *CaddyDaemon) onDockerHealthy(svc discovery.DiscoveredService) {
 
 func (d *CaddyDaemon) onUnroutedContainersChanged(containers []discovery.UnroutedContainer) {
 	log.Printf("unrouted docker containers: %d", len(containers))
-	unrouted := make([]proxy.UnroutedContainer, len(containers))
+	unrouted := make([]dashboard.UnroutedContainer, len(containers))
 	for i, c := range containers {
-		unrouted[i] = proxy.UnroutedContainer{
+		unrouted[i] = dashboard.UnroutedContainer{
 			ID:     c.ID,
 			Name:   c.Name,
 			Reason: c.Reason,

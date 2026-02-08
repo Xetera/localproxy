@@ -402,9 +402,9 @@
     </div>
     <div class="grid-container">
       <div class="service-list">
-        {{if or .DockerRoutes .UnroutedContainers}}
+        {{if or .DockerBackends .UnroutedContainers}}
         <div class="section-divider">Docker</div>
-        {{range .DockerRoutes}}
+        {{range .DockerBackends}}
         <a
           class="service-item{{if eq $.SelectedSubdomain .Subdomain}} active{{end}}"
           href="/?service={{.Subdomain}}"
@@ -454,9 +454,9 @@
         {{range .ProcessGroups}}
         <div class="subsection-divider">
           <div>{{.DisplayCwd}}</div>
-          <div>{{len .Routes}} processes</div>
+          <div>{{len .Backends}} processes</div>
         </div>
-        {{range .Routes}}
+        {{range .Backends}}
         <div class="grouped-item-wrapper">
           <a
             class="service-item{{if eq $.SelectedSubdomain .Subdomain}} active{{end}}"
@@ -511,9 +511,9 @@
             <span style="margin-left: auto">{{or .ServiceProtocol "?"}}</span>
           </div>
         </a>
-        {{end}} {{end}} {{if .WellKnownRoutes}}
+        {{end}} {{end}} {{if .WellKnownBackends}}
         <div class="section-divider">Well-Known Services</div>
-        {{range .WellKnownRoutes}}
+        {{range .WellKnownBackends}}
         <a
           class="service-item{{if eq $.SelectedSubdomain .Subdomain}} active{{end}}"
           href="/?service={{.Subdomain}}"
@@ -539,9 +539,9 @@
             <span style="margin-left: auto">{{or .ServiceProtocol "?"}}</span>
           </div>
         </a>
-        {{end}} {{end}} {{if .DisabledRoutes}}
+        {{end}} {{end}} {{if .DisabledBackends}}
         <div class="section-divider">Disabled Routes</div>
-        {{range .DisabledRoutes}}
+        {{range .DisabledBackends}}
         <a
           class="service-item{{if eq $.SelectedSubdomain .Subdomain}} active{{end}}"
           href="/?service={{.Subdomain}}"
@@ -559,23 +559,23 @@
             <span style="margin-left: auto">{{or .ServiceProtocol "?"}}</span>
           </div>
         </a>
-        {{end}} {{end}} {{if and (not .DockerRoutes) (not .ProcessGroups) (not
-        .UngroupedProcesses) (not .WellKnownRoutes) (not .DisabledRoutes)}}
+        {{end}} {{end}} {{if and (not .DockerBackends) (not .ProcessGroups) (not
+        .UngroupedProcesses) (not .WellKnownBackends) (not .DisabledBackends)}}
         <div class="detail-empty">No active services</div>
         {{end}}
       </div>
 
       <div class="detail-panel">
-        {{if .SelectedRoute}}
+        {{if .SelectedBackend}}
         <div class="detail-content">
           <div class="process-info">
             <a
               class="process-title"
-              href="https://{{if .SelectedRoute.Subdomain}}{{.SelectedRoute.Subdomain}}.{{end}}localhost"
+              href="https://{{if .SelectedBackend.Subdomain}}{{.SelectedBackend.Subdomain}}.{{end}}localhost"
               target="_blank"
             >
               https://{{if
-              .SelectedRoute.Subdomain}}{{.SelectedRoute.Subdomain}}.{{end}}localhost
+              .SelectedBackend.Subdomain}}{{.SelectedBackend.Subdomain}}.{{end}}localhost
             </a>
             <div class="metrics-grid">
               <div class="metric-card">
@@ -660,7 +660,7 @@
                 <span class="info-label">PID:</span>
                 <span class="info-value"
                   >{{if
-                  .SelectedRoute.PID}}{{.SelectedRoute.PID}}{{else}}-{{end}}</span
+                  .SelectedBackend.PID}}{{.SelectedBackend.PID}}{{else}}-{{end}}</span
                 >
               </div>
               <div class="info-item">
@@ -675,7 +675,7 @@
                 <span class="info-label">Working Dir:</span>
                 <span class="info-value"
                   >{{if
-                  .SelectedRoute.Cwd}}{{.SelectedRoute.Cwd}}{{else}}-{{end}}</span
+                  .SelectedBackend.Cwd}}{{.SelectedBackend.Cwd}}{{else}}-{{end}}</span
                 >
               </div>
             </div>
@@ -684,7 +684,7 @@
             <div class="logs-header">
               <div class="logs-title">Live Logs</div>
               <a
-                href="/logs?subdomain={{.SelectedRoute.Subdomain}}"
+                href="/logs?subdomain={{.SelectedBackend.Subdomain}}"
                 class="btn btn-primary"
                 target="_blank"
                 >Full Logs</a
@@ -695,10 +695,10 @@
               <div class="port-list">
                 {{range .SelectedPorts}}
                 <div
-                  class="port-item{{if eq .Port (port $.SelectedRoute.Endpoint)}} active{{end}}"
+                  class="port-item{{if eq .Port (port $.SelectedBackend.Endpoint)}} active{{end}}"
                 >
                   <span class="port-arrow"
-                    >{{if eq .Port (port $.SelectedRoute.Endpoint)}}&gt;{{end}}</span
+                    >{{if eq .Port (port $.SelectedBackend.Endpoint)}}&gt;{{end}}</span
                   >
                   <span>:{{.Text}}</span>
                   <span class="port-protocol">{{or .Protocol "?"}}</span>
@@ -709,13 +709,13 @@
               <div
                 class="logs-background"
                 data-disabled='{{
-                and .SelectedRoute (eq .SelectedRoute.Source "process")
+                and .SelectedBackend (eq .SelectedBackend.Source "process")
                                   (not $.TraceProcessLogs)
                 }}'
               >
                 <div class="logs-container">
-                  <!-- Debug: Source = "{{.SelectedRoute.Source}}" -->
-                  {{if and .SelectedRoute (eq .SelectedRoute.Source "process")
+                  <!-- Debug: Source = "{{.SelectedBackend.Source}}" -->
+                  {{if and .SelectedBackend (eq .SelectedBackend.Source "process")
                   (not $.TraceProcessLogs)}}
                   <div class="log-disclaimer">
                     <p>

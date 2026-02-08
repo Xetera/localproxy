@@ -1,27 +1,14 @@
 package proxy
 
-import (
-	"net/netip"
-
-	"github.com/xetera/localproxy/internal/discovery"
-)
+import "net/netip"
 
 type Route struct {
-	Subdomain          string
-	Endpoint           netip.AddrPort
-	TCPPort            int
-	PID                int
-	Cwd                string
-	Disabled           bool
-	Source             discovery.RouteSource
-	DockerHasAutoName  bool
-	DockerContainerID  string
-	DockerPorts        []discovery.DockerListener
-	NeedsCustomMapping bool
-	IsDocker           bool
-	ServiceProtocol    string
-	HasWildcard        bool
-	FolderGroup        string
-	TopLevelFolder     string
-	RelativePath       string
+	Subdomain       string
+	Endpoint        netip.AddrPort
+	TCPPort         int
+	ServiceProtocol string
+	HasWildcard     bool
+	FolderGroup     string
+	CertPath        string
+	KeyPath         string
 }

@@ -1,22 +1,15 @@
-package caddy
+package proxy
 
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp/reverseproxy"
 	"github.com/caddyserver/caddy/v2/modules/caddytls"
 )
-
-type Route struct {
-	Subdomain string
-	TargetIP  string
-	TargetPort int
-	CertPath  string
-	KeyPath   string
-}
 
 func mustJSON(v any) json.RawMessage {
 	b, err := json.Marshal(v)
@@ -38,24 +31,36 @@ func mustHTTPHandler(name string, h any) json.RawMessage {
 	return out
 }
 
-func BuildHTTPConfig(routes []Route) (*caddyhttp.App, *caddytls.TLS) {
+type certInfo struct {
+	tag      string
+	certPath string
+	keyPath  string
+	sniNames []string
+}
+
+func BuildCaddyConfig(routes []Route, httpsRedirect bool) (*caddyhttp.App, *caddytls.TLS) {
 	var httpsRoutes caddyhttp.RouteList
 	var httpRoutes caddyhttp.RouteList
-	var certPairs caddytls.FileLoader
-	certTags := make(map[string]bool)
+	certInfos := make(map[string]*certInfo)
 
 	for _, r := range routes {
 		upstream := &reverseproxy.Handler{
 			Upstreams: reverseproxy.UpstreamPool{
-				&reverseproxy.Upstream{Dial: fmt.Sprintf("%s:%d", r.TargetIP, r.TargetPort)},
+				&reverseproxy.Upstream{Dial: r.Endpoint.String()},
 			},
 		}
 
 		var hosts caddyhttp.MatchHost
+		var sniNames []string
 		if r.Subdomain == "" {
 			hosts = caddyhttp.MatchHost{"localhost", "proxy.localhost", "proxy.internal"}
+			sniNames = []string{"localhost", "proxy.localhost", "proxy.internal"}
 		} else {
 			hosts = caddyhttp.MatchHost{
+				r.Subdomain + ".localhost",
+				r.Subdomain + ".internal",
+			}
+			sniNames = []string{
 				r.Subdomain + ".localhost",
 				r.Subdomain + ".internal",
 			}
@@ -78,34 +83,71 @@ func BuildHTTPConfig(routes []Route) (*caddyhttp.App, *caddytls.TLS) {
 			tag = "localhost"
 		}
 
-		if !certTags[tag] && r.CertPath != "" && r.KeyPath != "" {
-			certPairs = append(certPairs, caddytls.CertKeyFilePair{
-				Certificate: r.CertPath,
-				Key:         r.KeyPath,
-				Tags:        []string{tag},
-			})
-			certTags[tag] = true
+		if r.CertPath != "" && r.KeyPath != "" {
+			if existing, ok := certInfos[tag]; ok {
+				existing.sniNames = append(existing.sniNames, sniNames...)
+			} else {
+				certInfos[tag] = &certInfo{
+					tag:      tag,
+					certPath: r.CertPath,
+					keyPath:  r.KeyPath,
+					sniNames: sniNames,
+				}
+			}
 		}
 	}
 
+	var certPairs caddytls.FileLoader
 	var connPolicies caddytls.ConnectionPolicies
-	for tag := range certTags {
+	for _, info := range certInfos {
+		certPairs = append(certPairs, caddytls.CertKeyFilePair{
+			Certificate: info.certPath,
+			Key:         info.keyPath,
+			Tags:        []string{info.tag},
+		})
 		connPolicies = append(connPolicies, &caddytls.ConnectionPolicy{
+			MatchersRaw: caddy.ModuleMap{
+				"sni": mustJSON(info.sniNames),
+			},
 			CertSelection: &caddytls.CustomCertSelectionPolicy{
-				AnyTag: []string{tag},
+				AnyTag: []string{info.tag},
 			},
 		})
 	}
 
+	connPolicies = append(connPolicies, &caddytls.ConnectionPolicy{})
+
 	httpsServer := &caddyhttp.Server{
-		Listen:          []string{":443"},
+		Listen:          []string{"0.0.0.0:443"},
 		TLSConnPolicies: connPolicies,
 		Routes:          httpsRoutes,
+		AutoHTTPS:       &caddyhttp.AutoHTTPSConfig{Disabled: true},
+	}
+
+	var httpServerRoutes caddyhttp.RouteList
+	if httpsRedirect {
+		httpServerRoutes = caddyhttp.RouteList{
+			{
+				HandlersRaw: []json.RawMessage{
+					mustHTTPHandler("static_response", caddyhttp.StaticResponse{
+						StatusCode: "308",
+						Headers: http.Header{
+							"Location": {"https://{http.request.host}{http.request.uri}"},
+						},
+						Close: true,
+					}),
+				},
+			},
+		}
+	} else {
+		httpServerRoutes = httpRoutes
 	}
 
 	httpServer := &caddyhttp.Server{
-		Listen: []string{":80"},
-		Routes: httpRoutes,
+		Listen:    []string{"0.0.0.0:80"},
+		Routes:    httpServerRoutes,
+		AutoHTTPS: &caddyhttp.AutoHTTPSConfig{Disabled: true},
+		Protocols: []string{"h1"},
 	}
 
 	httpApp := &caddyhttp.App{
@@ -124,8 +166,8 @@ func BuildHTTPConfig(routes []Route) (*caddyhttp.App, *caddytls.TLS) {
 	return httpApp, tlsApp
 }
 
-func BuildConfig(routes []Route, adminSocket string) (*caddy.Config, error) {
-	httpApp, tlsApp := BuildHTTPConfig(routes)
+func BuildFullCaddyConfig(routes []Route, adminSocket string, httpsRedirect bool) (*caddy.Config, error) {
+	httpApp, tlsApp := BuildCaddyConfig(routes, httpsRedirect)
 
 	httpJSON, err := json.Marshal(httpApp)
 	if err != nil {
@@ -143,7 +185,7 @@ func BuildConfig(routes []Route, adminSocket string) (*caddy.Config, error) {
 				"default": {
 					BaseLog: caddy.BaseLog{
 						WriterRaw: json.RawMessage(`{"output": "stdout"}`),
-						Level:     "INFO",
+						Level:     "WARN",
 					},
 				},
 			},

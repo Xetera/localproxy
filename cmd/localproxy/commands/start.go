@@ -14,7 +14,7 @@ import (
 func StartCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "start",
-		Short: "Start the localproxy daemon and Envoy",
+		Short: "Start the localproxy daemon and Caddy",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if isRunning() {
 				fmt.Println("daemon is already running")
