@@ -25,6 +25,9 @@ type ProcessWatcher struct {
 	dockerPorts map[uint16]bool
 }
 
+type Pid = int
+type ProcessMap = map[Pid]DiscoveredService
+
 func NewProcessWatcher(basePaths []string) (*ProcessWatcher, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	absPaths := make([]string, 0, len(basePaths))
@@ -41,7 +44,7 @@ func NewProcessWatcher(basePaths []string) (*ProcessWatcher, error) {
 		basePaths:   absPaths,
 		ctx:         ctx,
 		cancel:      cancel,
-		current:     make(map[int]DiscoveredService),
+		current:     make(ProcessMap),
 		dockerPorts: make(map[uint16]bool),
 	}, nil
 }
@@ -66,7 +69,7 @@ func (w *ProcessWatcher) Start() error {
 	}
 
 	w.mu.Lock()
-	w.current = make(map[int]DiscoveredService)
+	w.current = make(ProcessMap)
 	for _, s := range services {
 		if s.Process != nil {
 			w.current[s.Process.PID] = s
@@ -109,19 +112,8 @@ func (w *ProcessWatcher) watchLoop() {
 			}
 
 			w.mu.Lock()
-			changed := len(services) != len(w.current)
+			changed := w.isServicesChanged(services)
 			var newTargets []netip.AddrPort
-			if !changed {
-				for _, s := range services {
-					if s.Process == nil {
-						continue
-					}
-					if existing, ok := w.current[s.Process.PID]; !ok || existing.Endpoint.Port() != s.Endpoint.Port() {
-						changed = true
-						break
-					}
-				}
-			}
 			if changed {
 				for _, s := range services {
 					if s.Process == nil {
@@ -131,9 +123,6 @@ func (w *ProcessWatcher) watchLoop() {
 						newTargets = append(newTargets, s.Endpoint)
 					}
 				}
-			}
-
-			if changed {
 				w.current = make(map[int]DiscoveredService)
 				for _, s := range services {
 					if s.Process != nil {
@@ -153,6 +142,22 @@ func (w *ProcessWatcher) watchLoop() {
 			}
 		}
 	}
+}
+
+func (w *ProcessWatcher) isServicesChanged(services []DiscoveredService) bool {
+	changed := len(services) != len(w.current)
+	if !changed {
+		for _, s := range services {
+			if s.Process == nil {
+				continue
+			}
+			if existing, ok := w.current[s.Process.PID]; !ok || existing.Endpoint.Port() != s.Endpoint.Port() {
+				changed = true
+				break
+			}
+		}
+	}
+	return changed
 }
 
 func (w *ProcessWatcher) scan() ([]DiscoveredService, error) {
