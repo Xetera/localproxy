@@ -25,32 +25,39 @@ type PgMessage struct {
 	Raw       []byte    `json:"-"`
 }
 
-var (
-	pgMessages   map[netip.AddrPort][]PgMessage
-	pgMessagesMu sync.RWMutex
-)
+type PgMessageLog struct {
+	mu       sync.RWMutex
+	messages map[netip.AddrPort][]PgMessage
+	limit    int
+}
 
-func GetPgMessages(endpoint netip.AddrPort) []PgMessage {
-	pgMessagesMu.RLock()
-	defer pgMessagesMu.RUnlock()
-	result := make([]PgMessage, len(pgMessages))
-	messages, ok := pgMessages[endpoint]
-	if ok {
-		copy(result, messages)
+func NewPgMessageLog(limit int) *PgMessageLog {
+	return &PgMessageLog{
+		messages: make(map[netip.AddrPort][]PgMessage),
+		limit:    limit,
 	}
+}
+
+func (l *PgMessageLog) Record(endpoint netip.AddrPort, msg PgMessage) {
+	l.mu.Lock()
+	msgs := append(l.messages[endpoint], msg)
+	if len(msgs) > l.limit {
+		msgs = msgs[1:]
+	}
+	l.messages[endpoint] = msgs
+	l.mu.Unlock()
+}
+
+func (l *PgMessageLog) Get(endpoint netip.AddrPort) []PgMessage {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	msgs := l.messages[endpoint]
+	result := make([]PgMessage, len(msgs))
+	copy(result, msgs)
 	return result
 }
 
-func recordPgMessage(endpoint netip.AddrPort, msg PgMessage) {
-	pgMessagesMu.Lock()
-	pgMessages[endpoint] = append(pgMessages[endpoint], msg)
-	if len(pgMessages[endpoint]) > 1000 {
-		pgMessages[endpoint] = pgMessages[endpoint][1:]
-	}
-	pgMessagesMu.Unlock()
-}
-
-func ParseFrontendMessage(endpoint netip.AddrPort, data []byte) *PgMessage {
+func ParseFrontendMessage(data []byte) *PgMessage {
 	if len(data) < 4 {
 		return nil
 	}
@@ -72,7 +79,6 @@ func ParseFrontendMessage(endpoint netip.AddrPort, data []byte) *PgMessage {
 				"partial":    true,
 				"bytes_recv": len(data),
 			}
-			recordPgMessage(endpoint, *msg)
 			return msg
 		}
 
@@ -95,7 +101,6 @@ func ParseFrontendMessage(endpoint netip.AddrPort, data []byte) *PgMessage {
 			msg.Type = "UnknownStartup"
 		}
 
-		recordPgMessage(endpoint, *msg)
 		return msg
 	}
 
@@ -171,14 +176,10 @@ func ParseFrontendMessage(endpoint netip.AddrPort, data []byte) *PgMessage {
 		msg.Details = map[string]any{"type_byte": string(msgType)}
 	}
 
-	if msg.Type != "" {
-		recordPgMessage(endpoint, *msg)
-	}
-
 	return msg
 }
 
-func ParseBackendMessage(endpoint netip.AddrPort, data []byte) *PgMessage {
+func ParseBackendMessage(data []byte) *PgMessage {
 	if len(data) < 5 {
 		return nil
 	}
@@ -295,10 +296,6 @@ func ParseBackendMessage(endpoint netip.AddrPort, data []byte) *PgMessage {
 	default:
 		msg.Type = "Unknown"
 		msg.Details = map[string]any{"type_byte": string(msgType)}
-	}
-
-	if msg.Type != "" {
-		recordPgMessage(endpoint, *msg)
 	}
 
 	return msg
