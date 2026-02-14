@@ -3,6 +3,8 @@ package protocol
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"maps"
 	"net/netip"
 	"sync"
 	"time"
@@ -19,11 +21,11 @@ const (
 
 type PgMessage struct {
 	Timestamp time.Time      `json:"timestamp"`
-	Direction Direction       `json:"direction"`
-	Type      string          `json:"type"`
-	Details   any             `json:"details,omitempty"`
-	Endpoint  netip.AddrPort  `json:"endpoint"`
-	Raw       []byte          `json:"-"`
+	Direction Direction      `json:"direction"`
+	Type      string         `json:"type"`
+	Details   any            `json:"details,omitempty"`
+	Endpoint  netip.AddrPort `json:"endpoint"`
+	Raw       []byte         `json:"-"`
 }
 
 type PgMessageLog struct {
@@ -49,9 +51,7 @@ func (l *PgMessageLog) Record(msg PgMessage) {
 		l.messages = l.messages[1:]
 	}
 	subs := make(map[uint64]chan PgMessage, len(l.subscribers))
-	for id, ch := range l.subscribers {
-		subs[id] = ch
-	}
+	maps.Copy(subs, l.subscribers)
 	l.mu.Unlock()
 
 	for _, ch := range subs {
@@ -89,290 +89,229 @@ func (l *PgMessageLog) Unsubscribe(id uint64) {
 	}
 }
 
-func ParseFrontendMessage(data []byte) *PgMessage {
-	if len(data) < 4 {
-		return nil
-	}
-
-	msg := &PgMessage{
-		Timestamp: time.Now(),
-		Direction: DirectionClientToServer,
-		Raw:       data,
-	}
-
-	if isStartupMessage(data) {
-		r := bytes.NewReader(data)
-		backend := pgproto3.NewBackend(r, nil)
-		startupMsg, err := backend.ReceiveStartupMessage()
-		if err != nil {
-			msg.Type = "StartupMessage"
-			msg.Details = map[string]any{
-				"error":      err.Error(),
-				"partial":    true,
-				"bytes_recv": len(data),
-			}
-			return msg
+func frontendMessageToDetails(m pgproto3.FrontendMessage) (string, any) {
+	switch msg := m.(type) {
+	case *pgproto3.StartupMessage:
+		return "StartupMessage", map[string]any{
+			"protocol_version": msg.ProtocolVersion,
+			"parameters":       msg.Parameters,
 		}
-
-		switch m := startupMsg.(type) {
-		case *pgproto3.StartupMessage:
-			msg.Type = "StartupMessage"
-			msg.Details = map[string]any{
-				"protocol_version": m.ProtocolVersion,
-				"parameters":       m.Parameters,
-			}
-		case *pgproto3.SSLRequest:
-			msg.Type = "SSLRequest"
-		case *pgproto3.CancelRequest:
-			msg.Type = "CancelRequest"
-			msg.Details = map[string]any{
-				"process_id": m.ProcessID,
-				"secret_key": m.SecretKey,
-			}
-		default:
-			msg.Type = "UnknownStartup"
+	case *pgproto3.SSLRequest:
+		return "SSLRequest", nil
+	case *pgproto3.CancelRequest:
+		return "CancelRequest", map[string]any{
+			"process_id": msg.ProcessID,
+			"secret_key": msg.SecretKey,
 		}
-
-		return msg
-	}
-
-	if len(data) < 5 {
-		return nil
-	}
-
-	msgType := data[0]
-
-	switch msgType {
-	case 'Q':
-		var q pgproto3.Query
-		if err := q.Decode(data[5:]); err == nil {
-			msg.Type = "Query"
-			msg.Details = map[string]any{"query": q.String}
+	case *pgproto3.GSSEncRequest:
+		return "GSSEncRequest", nil
+	case *pgproto3.Query:
+		return "Query", map[string]any{"query": msg.String}
+	case *pgproto3.Parse:
+		return "Parse", map[string]any{"name": msg.Name, "query": msg.Query}
+	case *pgproto3.Bind:
+		return "Bind", map[string]any{
+			"portal":             msg.DestinationPortal,
+			"prepared_statement": msg.PreparedStatement,
+			"parameter_count":    len(msg.Parameters),
 		}
-	case 'P':
-		var p pgproto3.Parse
-		if err := p.Decode(data[5:]); err == nil {
-			msg.Type = "Parse"
-			msg.Details = map[string]any{
-				"name":  p.Name,
-				"query": p.Query,
-			}
-		}
-	case 'B':
-		var b pgproto3.Bind
-		if err := b.Decode(data[5:]); err == nil {
-			msg.Type = "Bind"
-			msg.Details = map[string]any{
-				"portal":             b.DestinationPortal,
-				"prepared_statement": b.PreparedStatement,
-				"parameter_count":    len(b.Parameters),
-			}
-		}
-	case 'E':
-		var e pgproto3.Execute
-		if err := e.Decode(data[5:]); err == nil {
-			msg.Type = "Execute"
-			msg.Details = map[string]any{
-				"portal":   e.Portal,
-				"max_rows": e.MaxRows,
-			}
-		}
-	case 'D':
-		var d pgproto3.Describe
-		if err := d.Decode(data[5:]); err == nil {
-			msg.Type = "Describe"
-			msg.Details = map[string]any{
-				"object_type": string(d.ObjectType),
-				"name":        d.Name,
-			}
-		}
-	case 'C':
-		var c pgproto3.Close
-		if err := c.Decode(data[5:]); err == nil {
-			msg.Type = "Close"
-			msg.Details = map[string]any{
-				"object_type": string(c.ObjectType),
-				"name":        c.Name,
-			}
-		}
-	case 'S':
-		msg.Type = "Sync"
-	case 'X':
-		msg.Type = "Terminate"
-	case 'p':
-		msg.Type = "PasswordMessage"
-	case 'H':
-		msg.Type = "Flush"
+	case *pgproto3.Execute:
+		return "Execute", map[string]any{"portal": msg.Portal, "max_rows": msg.MaxRows}
+	case *pgproto3.Describe:
+		return "Describe", map[string]any{"object_type": string(msg.ObjectType), "name": msg.Name}
+	case *pgproto3.Close:
+		return "Close", map[string]any{"object_type": string(msg.ObjectType), "name": msg.Name}
+	case *pgproto3.Sync:
+		return "Sync", nil
+	case *pgproto3.Terminate:
+		return "Terminate", nil
+	case *pgproto3.Flush:
+		return "Flush", nil
+	case *pgproto3.CopyData:
+		return "CopyData", map[string]any{"length": len(msg.Data)}
+	case *pgproto3.CopyDone:
+		return "CopyDone", nil
+	case *pgproto3.CopyFail:
+		return "CopyFail", map[string]any{"message": msg.Message}
+	case *pgproto3.FunctionCall:
+		return "FunctionCall", map[string]any{"function": msg.Function}
+	case *pgproto3.PasswordMessage:
+		return "PasswordMessage", nil
+	case *pgproto3.SASLInitialResponse:
+		return "SASLInitialResponse", map[string]any{"mechanism": msg.AuthMechanism}
+	case *pgproto3.SASLResponse:
+		return "SASLResponse", nil
 	default:
-		msg.Type = "Unknown"
-		msg.Details = map[string]any{"type_byte": string(msgType)}
+		return fmt.Sprintf("Unknown(%T)", m), nil
 	}
-
-	return msg
 }
 
-func ParseBackendMessage(data []byte) *PgMessage {
-	if len(data) < 5 {
-		return nil
-	}
-
-	msg := &PgMessage{
-		Timestamp: time.Now(),
-		Direction: DirectionServerToClient,
-		Raw:       data,
-	}
-
-	msgType := data[0]
-
-	switch msgType {
-	case 'R':
-		msg.Type = "Authentication"
-		if len(data) >= 9 {
-			authType := int32(data[5])<<24 | int32(data[6])<<16 | int32(data[7])<<8 | int32(data[8])
-			msg.Details = map[string]any{"auth_type": authType}
+func backendMessageToDetails(m pgproto3.BackendMessage) (string, any) {
+	switch msg := m.(type) {
+	case *pgproto3.AuthenticationOk:
+		return "AuthenticationOk", nil
+	case *pgproto3.AuthenticationCleartextPassword:
+		return "AuthenticationCleartextPassword", nil
+	case *pgproto3.AuthenticationMD5Password:
+		return "AuthenticationMD5Password", nil
+	case *pgproto3.AuthenticationSASL:
+		return "AuthenticationSASL", map[string]any{"mechanisms": msg.AuthMechanisms}
+	case *pgproto3.AuthenticationSASLContinue:
+		return "AuthenticationSASLContinue", nil
+	case *pgproto3.AuthenticationSASLFinal:
+		return "AuthenticationSASLFinal", nil
+	case *pgproto3.AuthenticationGSS:
+		return "AuthenticationGSS", nil
+	case *pgproto3.AuthenticationGSSContinue:
+		return "AuthenticationGSSContinue", nil
+	case *pgproto3.BackendKeyData:
+		return "BackendKeyData", map[string]any{
+			"process_id": msg.ProcessID,
+			"secret_key": msg.SecretKey,
 		}
-	case 'K':
-		var k pgproto3.BackendKeyData
-		if err := k.Decode(data[5:]); err == nil {
-			msg.Type = "BackendKeyData"
-			msg.Details = map[string]any{
-				"process_id": k.ProcessID,
-				"secret_key": k.SecretKey,
+	case *pgproto3.ParameterStatus:
+		return "ParameterStatus", map[string]any{"name": msg.Name, "value": msg.Value}
+	case *pgproto3.ReadyForQuery:
+		return "ReadyForQuery", map[string]any{"transaction_status": string(msg.TxStatus)}
+	case *pgproto3.RowDescription:
+		fields := make([]map[string]any, len(msg.Fields))
+		for i, f := range msg.Fields {
+			fields[i] = map[string]any{
+				"name":      string(f.Name),
+				"table_oid": f.TableOID,
+				"data_type": f.DataTypeOID,
 			}
 		}
-	case 'S':
-		var s pgproto3.ParameterStatus
-		if err := s.Decode(data[5:]); err == nil {
-			msg.Type = "ParameterStatus"
-			msg.Details = map[string]any{
-				"name":  s.Name,
-				"value": s.Value,
+		return "RowDescription", map[string]any{"fields": fields}
+	case *pgproto3.DataRow:
+		values := make([]string, len(msg.Values))
+		for i, v := range msg.Values {
+			if v == nil {
+				values[i] = "<null>"
+			} else {
+				values[i] = string(v)
 			}
 		}
-	case 'Z':
-		var z pgproto3.ReadyForQuery
-		if err := z.Decode(data[5:]); err == nil {
-			msg.Type = "ReadyForQuery"
-			msg.Details = map[string]any{
-				"transaction_status": string(z.TxStatus),
-			}
+		return "DataRow", map[string]any{"values": values}
+	case *pgproto3.CommandComplete:
+		return "CommandComplete", map[string]any{"command_tag": string(msg.CommandTag)}
+	case *pgproto3.ErrorResponse:
+		return "ErrorResponse", map[string]any{
+			"severity": msg.Severity,
+			"code":     msg.Code,
+			"message":  msg.Message,
+			"detail":   msg.Detail,
 		}
-	case 'T':
-		var t pgproto3.RowDescription
-		if err := t.Decode(data[5:]); err == nil {
-			msg.Type = "RowDescription"
-			fields := make([]map[string]any, len(t.Fields))
-			for i, f := range t.Fields {
-				fields[i] = map[string]any{
-					"name":      string(f.Name),
-					"table_oid": f.TableOID,
-					"data_type": f.DataTypeOID,
-				}
-			}
-			msg.Details = map[string]any{"fields": fields}
+	case *pgproto3.NoticeResponse:
+		return "NoticeResponse", map[string]any{"severity": msg.Severity, "message": msg.Message}
+	case *pgproto3.ParseComplete:
+		return "ParseComplete", nil
+	case *pgproto3.BindComplete:
+		return "BindComplete", nil
+	case *pgproto3.CloseComplete:
+		return "CloseComplete", nil
+	case *pgproto3.NoData:
+		return "NoData", nil
+	case *pgproto3.PortalSuspended:
+		return "PortalSuspended", nil
+	case *pgproto3.ParameterDescription:
+		return "ParameterDescription", nil
+	case *pgproto3.EmptyQueryResponse:
+		return "EmptyQueryResponse", nil
+	case *pgproto3.CopyInResponse:
+		return "CopyInResponse", nil
+	case *pgproto3.CopyOutResponse:
+		return "CopyOutResponse", nil
+	case *pgproto3.CopyBothResponse:
+		return "CopyBothResponse", nil
+	case *pgproto3.CopyData:
+		return "CopyData", map[string]any{"length": len(msg.Data)}
+	case *pgproto3.CopyDone:
+		return "CopyDone", nil
+	case *pgproto3.NotificationResponse:
+		return "NotificationResponse", map[string]any{
+			"channel": msg.Channel,
+			"payload": msg.Payload,
+			"pid":     msg.PID,
 		}
-	case 'D':
-		var d pgproto3.DataRow
-		if err := d.Decode(data[5:]); err == nil {
-			msg.Type = "DataRow"
-			values := make([]string, len(d.Values))
-			for i, v := range d.Values {
-				if v == nil {
-					values[i] = "<null>"
-				} else {
-					values[i] = string(v)
-				}
-			}
-			msg.Details = map[string]any{"values": values}
-		}
-	case 'C':
-		var c pgproto3.CommandComplete
-		if err := c.Decode(data[5:]); err == nil {
-			msg.Type = "CommandComplete"
-			msg.Details = map[string]any{"command_tag": string(c.CommandTag)}
-		}
-	case 'E':
-		var e pgproto3.ErrorResponse
-		if err := e.Decode(data[5:]); err == nil {
-			msg.Type = "ErrorResponse"
-			msg.Details = map[string]any{
-				"severity": e.Severity,
-				"code":     e.Code,
-				"message":  e.Message,
-				"detail":   e.Detail,
-			}
-		}
-	case 'N':
-		var n pgproto3.NoticeResponse
-		if err := n.Decode(data[5:]); err == nil {
-			msg.Type = "NoticeResponse"
-			msg.Details = map[string]any{
-				"severity": n.Severity,
-				"message":  n.Message,
-			}
-		}
-	case '1':
-		msg.Type = "ParseComplete"
-	case '2':
-		msg.Type = "BindComplete"
-	case '3':
-		msg.Type = "CloseComplete"
-	case 'n':
-		msg.Type = "NoData"
-	case 's':
-		msg.Type = "PortalSuspended"
-	case 't':
-		msg.Type = "ParameterDescription"
-	case 'I':
-		msg.Type = "EmptyQueryResponse"
+	case *pgproto3.FunctionCallResponse:
+		return "FunctionCallResponse", nil
 	default:
-		msg.Type = "Unknown"
-		msg.Details = map[string]any{"type_byte": string(msgType)}
+		return fmt.Sprintf("Unknown(%T)", m), nil
 	}
-
-	return msg
 }
 
 func ParseFrontendMessages(data []byte) []*PgMessage {
 	if len(data) < 4 {
 		return nil
 	}
+
+	now := time.Now()
+	r := bytes.NewReader(data)
+	backend := pgproto3.NewBackend(r, nil)
+
 	if isStartupMessage(data) {
-		msg := ParseFrontendMessage(data)
-		if msg == nil {
-			return nil
+		startupMsg, err := backend.ReceiveStartupMessage()
+		if err != nil {
+			return []*PgMessage{{
+				Timestamp: now,
+				Direction: DirectionClientToServer,
+				Type:      "StartupMessage",
+				Details: map[string]any{
+					"error":      err.Error(),
+					"partial":    true,
+					"bytes_recv": len(data),
+				},
+			}}
 		}
-		return []*PgMessage{msg}
+		typeName, details := frontendMessageToDetails(startupMsg)
+		return []*PgMessage{{
+			Timestamp: now,
+			Direction: DirectionClientToServer,
+			Type:      typeName,
+			Details:   details,
+		}}
 	}
+
 	var msgs []*PgMessage
-	for len(data) >= 5 {
-		msgLen := int(data[1])<<24 | int(data[2])<<16 | int(data[3])<<8 | int(data[4])
-		totalLen := 1 + msgLen
-		if totalLen < 5 || totalLen > len(data) {
+	for {
+		m, err := backend.Receive()
+		if err != nil {
 			break
 		}
-		msg := ParseFrontendMessage(data[:totalLen])
-		if msg != nil {
-			msgs = append(msgs, msg)
-		}
-		data = data[totalLen:]
+		typeName, details := frontendMessageToDetails(m)
+		msgs = append(msgs, &PgMessage{
+			Timestamp: now,
+			Direction: DirectionClientToServer,
+			Type:      typeName,
+			Details:   details,
+		})
 	}
 	return msgs
 }
 
 func ParseBackendMessages(data []byte) []*PgMessage {
+	if len(data) < 5 {
+		return nil
+	}
+
+	now := time.Now()
+	r := bytes.NewReader(data)
+	frontend := pgproto3.NewFrontend(r, nil)
+
 	var msgs []*PgMessage
-	for len(data) >= 5 {
-		msgLen := int(data[1])<<24 | int(data[2])<<16 | int(data[3])<<8 | int(data[4])
-		totalLen := 1 + msgLen
-		if totalLen < 5 || totalLen > len(data) {
+	for {
+		m, err := frontend.Receive()
+		if err != nil {
 			break
 		}
-		msg := ParseBackendMessage(data[:totalLen])
-		if msg != nil {
-			msgs = append(msgs, msg)
-		}
-		data = data[totalLen:]
+		typeName, details := backendMessageToDetails(m)
+		msgs = append(msgs, &PgMessage{
+			Timestamp: now,
+			Direction: DirectionServerToClient,
+			Type:      typeName,
+			Details:   details,
+		})
 	}
 	return msgs
 }
