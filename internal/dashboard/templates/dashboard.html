@@ -2,6 +2,8 @@
 <html>
   <head>
     <title>LocalProxy Dashboard</title>
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <script src="https://unpkg.com/htmx-ext-sse@2.2.2/sse.js"></script>
     <style>
       * {
         box-sizing: border-box;
@@ -377,6 +379,80 @@
         border-color: #3b82f6;
         color: #93c5fd;
       }
+      .tab-radio {
+        display: none;
+      }
+      .tab-bar {
+        display: flex;
+        gap: 0;
+        border-bottom: 1px solid #262626;
+        margin-bottom: 1rem;
+      }
+      .tab {
+        padding: 0.5rem 1rem;
+        font-size: 0.8rem;
+        font-weight: 500;
+        color: #737373;
+        cursor: pointer;
+        border-bottom: 2px solid transparent;
+        transition: all 0.15s;
+      }
+      .tab:hover {
+        color: #a3a3a3;
+      }
+      .tab-content {
+        display: none;
+        flex: 1;
+        min-height: 0;
+        flex-direction: column;
+      }
+      #tab-select-logs:checked ~ .tab-bar label[for="tab-select-logs"],
+      #tab-select-pg:checked ~ .tab-bar label[for="tab-select-pg"] {
+        color: #60a5fa;
+        border-bottom-color: #60a5fa;
+      }
+      #tab-select-logs:checked ~ #tab-logs,
+      #tab-select-pg:checked ~ #tab-pg {
+        display: flex;
+      }
+      .pg-messages-container {
+        flex: 1;
+        background: #000;
+        border: 1px solid #262626;
+        border-radius: 0.5rem;
+        padding: 1rem;
+        overflow-y: auto;
+        font-family: ui-monospace, monospace;
+        font-size: 0.8rem;
+        line-height: 1.6;
+      }
+      .pg-msg {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .pg-ts {
+        color: #525252;
+        margin-right: 0.5rem;
+      }
+      .pg-dir {
+        margin-right: 0.5rem;
+        font-weight: 600;
+      }
+      .pg-dir-client {
+        color: #60a5fa;
+      }
+      .pg-dir-server {
+        color: #4ade80;
+      }
+      .pg-type {
+        color: #e5e5e5;
+        margin-right: 0.75rem;
+        font-weight: 500;
+      }
+      .pg-detail {
+        color: #737373;
+      }
     </style>
   </head>
   <body>
@@ -681,68 +757,85 @@
             </div>
           </div>
           <div class="logs-section">
-            <div class="logs-header">
-              <div class="logs-title">Live Logs</div>
-              <a
-                href="/logs?subdomain={{.SelectedBackend.Subdomain}}"
-                class="btn btn-primary"
-                target="_blank"
-                >Full Logs</a
-              >
+            <input type="radio" name="tab" id="tab-select-logs" class="tab-radio" checked>
+            {{if .SelectedBackend.TCPPort}}<input type="radio" name="tab" id="tab-select-pg" class="tab-radio">{{end}}
+            <div class="tab-bar">
+              <label for="tab-select-logs" class="tab">Logs</label>
+              {{if .SelectedBackend.TCPPort}}<label for="tab-select-pg" class="tab">PG Messages</label>{{end}}
             </div>
-            <div class="logs-with-ports">
-              {{if and .SelectedPorts (gt (len .SelectedPorts) 1)}}
-              <div class="port-list">
-                {{range .SelectedPorts}}
-                <div
-                  class="port-item{{if eq .Port (port $.SelectedBackend.Endpoint)}} active{{end}}"
+            <div id="tab-logs" class="tab-content">
+              <div class="logs-header">
+                <div class="logs-title">Live Logs</div>
+                <a
+                  href="/logs?subdomain={{.SelectedBackend.Subdomain}}"
+                  class="btn btn-primary"
+                  target="_blank"
+                  >Full Logs</a
                 >
-                  <span class="port-arrow"
-                    >{{if eq .Port (port
-                    $.SelectedBackend.Endpoint)}}&gt;{{end}}</span
-                  >
-                  <span>:{{.Text}}</span>
-                  <span class="port-protocol">{{or .Protocol "?"}}</span>
-                </div>
-                {{end}}
               </div>
-              {{end}}
-              <div
-                class="logs-background"
-                data-disabled='{{
-                and .SelectedBackend (eq .SelectedBackend.Source "process")
-                                  (not $.TraceProcessLogs)
-                }}'
-              >
-                <div class="logs-container">
-                  <!-- Debug: Source = "{{.SelectedBackend.Source}}" -->
-                  {{if and .SelectedBackend (eq .SelectedBackend.Source
-                  "process") (not $.TraceProcessLogs)}}
-                  <div class="log-disclaimer">
-                    <p>
-                      Logs for processes are disabled. To enable them, run
-                      localproxy with the
-                      <code>--trace-process-logs</code> flag.
-
-                      <br />
-                      <br />
-                      <b>Warning</b>
-                      <br />
-                      Tracing process logs on MacOS requires SIP (System
-                      Integrity Protection) to be (partially) disabled, and
-                      <i>will</i>
-                      cause your system to become unresponsive if you're not on
-                      Tahoe yet.
-                    </p>
+              <div class="logs-with-ports">
+                {{if and .SelectedPorts (gt (len .SelectedPorts) 1)}}
+                <div class="port-list">
+                  {{range .SelectedPorts}}
+                  <div
+                    class="port-item{{if eq .Port (port $.SelectedBackend.Endpoint)}} active{{end}}"
+                  >
+                    <span class="port-arrow"
+                      >{{if eq .Port (port
+                      $.SelectedBackend.Endpoint)}}&gt;{{end}}</span
+                    >
+                    <span>:{{.Text}}</span>
+                    <span class="port-protocol">{{or .Protocol "?"}}</span>
                   </div>
-                  {{else if .SelectedLogs}} {{range .SelectedLogs}}
-                  <div class="log-line">{{.}}</div>
-                  {{end}} {{else}}
-                  <div class="no-logs">No recent logs</div>
                   {{end}}
                 </div>
+                {{end}}
+                <div
+                  class="logs-background"
+                  data-disabled='{{
+                  and .SelectedBackend (eq .SelectedBackend.Source "process")
+                                    (not $.TraceProcessLogs)
+                  }}'
+                >
+                  <div class="logs-container">
+                    {{if and .SelectedBackend (eq .SelectedBackend.Source
+                    "process") (not $.TraceProcessLogs)}}
+                    <div class="log-disclaimer">
+                      <p>
+                        Logs for processes are disabled. To enable them, run
+                        localproxy with the
+                        <code>--trace-process-logs</code> flag.
+
+                        <br />
+                        <br />
+                        <b>Warning</b>
+                        <br />
+                        Tracing process logs on MacOS requires SIP (System
+                        Integrity Protection) to be (partially) disabled, and
+                        <i>will</i>
+                        cause your system to become unresponsive if you're not on
+                        Tahoe yet.
+                      </p>
+                    </div>
+                    {{else if .SelectedLogs}} {{range .SelectedLogs}}
+                    <div class="log-line">{{.}}</div>
+                    {{end}} {{else}}
+                    <div class="no-logs">No recent logs</div>
+                    {{end}}
+                  </div>
+                </div>
               </div>
             </div>
+            {{if .SelectedBackend.TCPPort}}
+            <div id="tab-pg" class="tab-content">
+              <div class="pg-messages-container"
+                   hx-ext="sse"
+                   sse-connect="/api/pg-messages?subdomain={{.SelectedBackend.Subdomain}}"
+                   sse-swap="pg-message"
+                   hx-swap="beforeend">
+              </div>
+            </div>
+            {{end}}
           </div>
         </div>
         {{else}}
@@ -750,5 +843,13 @@
         {{end}}
       </div>
     </div>
+    <script>
+      document.body.addEventListener('htmx:sseMessage', function(e) {
+        var container = document.querySelector('.pg-messages-container');
+        if (container) {
+          container.scrollTop = container.scrollHeight;
+        }
+      });
+    </script>
   </body>
 </html>

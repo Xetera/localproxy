@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"html/template"
 	"io"
 	"log"
@@ -116,12 +117,11 @@ func NewDashboardServer(basePaths []string, traceProcessLogs bool, pgMessages <-
 	mux.HandleFunc("/logs", s.serveLogs)
 	mux.HandleFunc("/api/logs-preview", s.serveLogsPreview)
 	mux.HandleFunc("/api/subdomain-mapping", s.handleSubdomainMapping)
+	mux.HandleFunc("/api/pg-messages", s.streamPgMessages)
 
 	s.server = &http.Server{
-		Addr:         fmt.Sprintf("127.0.0.1:%d", ServerPort),
-		Handler:      mux,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 30 * time.Second,
+		Addr:    fmt.Sprintf("127.0.0.1:%d", ServerPort),
+		Handler: mux,
 	}
 
 	return s
@@ -251,8 +251,76 @@ func (s *DashboardServer) drainPgMessages() {
 			if !ok {
 				return
 			}
-			s.pgLog.Record(msg.Endpoint, msg)
+			s.pgLog.Record(msg)
 		case <-s.stopPgDrain:
+			return
+		}
+	}
+}
+
+func renderPgMessageHTML(msg protocol.PgMessage) string {
+	ts := msg.Timestamp.Format("15:04:05.000")
+	arrow := "\u2192"
+	dirClass := "pg-dir-client"
+	if msg.Direction == protocol.DirectionServerToClient {
+		arrow = "\u2190"
+		dirClass = "pg-dir-server"
+	}
+
+	var detail string
+	if msg.Type == "Query" {
+		if m, ok := msg.Details.(map[string]any); ok {
+			if q, ok := m["query"].(string); ok {
+				detail = q
+			}
+		}
+	} else if msg.Details != nil {
+		if b, err := json.Marshal(msg.Details); err == nil {
+			detail = string(b)
+		}
+	}
+
+	return fmt.Sprintf(
+		`<div class="pg-msg"><span class="pg-ts">%s</span> <span class="pg-dir %s">%s</span> <span class="pg-type">%s</span> <span class="pg-detail">%s</span></div>`,
+		html.EscapeString(ts),
+		dirClass,
+		arrow,
+		html.EscapeString(msg.Type),
+		html.EscapeString(detail),
+	)
+}
+
+func (s *DashboardServer) streamPgMessages(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	subID, ch := s.pgLog.Subscribe()
+	defer s.pgLog.Unsubscribe(subID)
+
+	for _, msg := range s.pgLog.GetAll() {
+		fragment := renderPgMessageHTML(msg)
+		fmt.Fprintf(w, "event: pg-message\ndata: %s\n\n", fragment)
+	}
+	flusher.Flush()
+
+	for {
+		select {
+		case msg, ok := <-ch:
+			if !ok {
+				return
+			}
+			fragment := renderPgMessageHTML(msg)
+			fmt.Fprintf(w, "event: pg-message\ndata: %s\n\n", fragment)
+			flusher.Flush()
+		case <-r.Context().Done():
 			return
 		}
 	}

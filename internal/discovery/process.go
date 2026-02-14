@@ -204,6 +204,10 @@ func (s *scanState) tryWellKnown(pid int, endpoint netip.AddrPort) *DiscoveredSe
 			PID:         pid,
 			IsWellKnown: true,
 		},
+		Service: &ServiceInfo{
+			Endpoint: endpoint,
+			Protocol: info.Subdomain,
+		},
 	}
 }
 

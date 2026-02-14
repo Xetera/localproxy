@@ -195,7 +195,7 @@ func (w *DockerWatcher) parseContainer(c container.Summary) (*DiscoveredService,
 		return nil, fmt.Sprintf("invalid endpoint: %s", rawEndpoint)
 	}
 
-	return &DiscoveredService{
+	ds := &DiscoveredService{
 		Subdomain: subdomain,
 		Endpoint:  endpoint,
 		TCPPort:   tcpPort,
@@ -206,7 +206,24 @@ func (w *DockerWatcher) parseContainer(c container.Summary) (*DiscoveredService,
 			HasCustomName: hasCustomName,
 			Ports:         allPorts,
 		},
-	}, ""
+	}
+
+	if tcpPort > 0 {
+		for _, dp := range allPorts {
+			if dp.Type != "tcp" {
+				continue
+			}
+			if info, ok := WellKnownPorts[uint16(dp.PrivatePort)]; ok && info.Protocol == ProtocolTCP {
+				ds.Service = &ServiceInfo{
+					Endpoint: dp.Endpoint,
+					Protocol: info.Subdomain,
+				}
+				break
+			}
+		}
+	}
+
+	return ds, ""
 }
 
 func (w *DockerWatcher) watchEvents() {

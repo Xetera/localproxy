@@ -245,9 +245,11 @@ type tappedConn struct {
 func (c *tappedConn) Read(p []byte) (n int, err error) {
 	n, err = c.Conn.Read(p)
 	c.bytesIn += int64(n)
+	fmt.Println(n, c.parseProto)
 	if n > 0 && c.parseProto {
 		if msg := protocol.ParseFrontendMessage(p[:n]); msg != nil {
 			msg.Endpoint = c.addrPort
+			fmt.Println(msg)
 			if PgMessageSink != nil {
 				select {
 				case PgMessageSink <- *msg:
@@ -312,13 +314,15 @@ func BuildL4App(routes []proxy.Route) *layer4.App {
 			},
 		}
 
+		parseProto := r.ServiceProtocol == "postgres"
+		
 		tlsHandler := &l4tls.Handler{
 			ConnectionPolicies: caddytls.ConnectionPolicies{
-				&caddytls.ConnectionPolicy{},
+				&caddytls.ConnectionPolicy{
+					ALPN: []string{"postgresql"},
+				},
 			},
 		}
-
-		parseProto := r.ServiceProtocol == "postgres"
 
 		tlsRoute := &layer4.Route{
 			MatcherSetsRaw: []caddy.ModuleMap{

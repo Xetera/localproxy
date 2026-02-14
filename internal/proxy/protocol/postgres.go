@@ -27,35 +27,66 @@ type PgMessage struct {
 }
 
 type PgMessageLog struct {
-	mu       sync.RWMutex
-	messages map[netip.AddrPort][]PgMessage
-	limit    int
+	mu          sync.RWMutex
+	messages    []PgMessage
+	limit       int
+	subscribers map[uint64]chan PgMessage
+	nextID      uint64
 }
 
 func NewPgMessageLog(limit int) *PgMessageLog {
 	return &PgMessageLog{
-		messages: make(map[netip.AddrPort][]PgMessage),
-		limit:    limit,
+		messages:    make([]PgMessage, 0, limit),
+		limit:       limit,
+		subscribers: make(map[uint64]chan PgMessage),
 	}
 }
 
-func (l *PgMessageLog) Record(endpoint netip.AddrPort, msg PgMessage) {
+func (l *PgMessageLog) Record(msg PgMessage) {
 	l.mu.Lock()
-	msgs := append(l.messages[endpoint], msg)
-	if len(msgs) > l.limit {
-		msgs = msgs[1:]
+	l.messages = append(l.messages, msg)
+	if len(l.messages) > l.limit {
+		l.messages = l.messages[1:]
 	}
-	l.messages[endpoint] = msgs
+	subs := make(map[uint64]chan PgMessage, len(l.subscribers))
+	for id, ch := range l.subscribers {
+		subs[id] = ch
+	}
 	l.mu.Unlock()
+
+	for _, ch := range subs {
+		select {
+		case ch <- msg:
+		default:
+		}
+	}
 }
 
-func (l *PgMessageLog) Get(endpoint netip.AddrPort) []PgMessage {
+func (l *PgMessageLog) GetAll() []PgMessage {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
-	msgs := l.messages[endpoint]
-	result := make([]PgMessage, len(msgs))
-	copy(result, msgs)
+	result := make([]PgMessage, len(l.messages))
+	copy(result, l.messages)
 	return result
+}
+
+func (l *PgMessageLog) Subscribe() (uint64, <-chan PgMessage) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	id := l.nextID
+	l.nextID++
+	ch := make(chan PgMessage, 64)
+	l.subscribers[id] = ch
+	return id, ch
+}
+
+func (l *PgMessageLog) Unsubscribe(id uint64) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if ch, ok := l.subscribers[id]; ok {
+		close(ch)
+		delete(l.subscribers, id)
+	}
 }
 
 func ParseFrontendMessage(data []byte) *PgMessage {
