@@ -67,6 +67,16 @@ func (r *RouteRegistry) UpdateServices(source discovery.RouteSource, services []
 
 	for _, svc := range services {
 		subdomain := svc.Subdomain
+		if svc.Process != nil {
+			switch svc.Source {
+			case discovery.RouteSourceProcess:
+				subdomain = svc.Process.TopLevelFolder
+			case discovery.RouteSourceWellKnown:
+				if info, ok := discovery.WellKnownPorts[svc.Endpoint.Port()]; ok {
+					subdomain = info.Subdomain
+				}
+			}
+		}
 
 		needsMapping := svc.Process != nil && svc.Process.NeedsCustomMapping
 		if svc.Process != nil && svc.Process.TopLevelFolder != "" {

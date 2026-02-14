@@ -213,8 +213,8 @@ func (w *ProcessWatcher) processEntry(state *scanState, entry portEntry) {
 		return
 	}
 
-	result := w.buildSubdomain(basePath, cwd, state.ignoredDirs)
-	if result.subdomain == "" && !result.needsCustomMapping {
+	result := w.resolvePathInfo(basePath, cwd, state.ignoredDirs)
+	if result.topLevelFolder == "" && !result.needsCustomMapping {
 		return
 	}
 
@@ -247,10 +247,9 @@ func (w *ProcessWatcher) addWellKnownProcess(state *scanState, pid int, endpoint
 		return
 	}
 	state.results = append(state.results, DiscoveredService{
-		Subdomain: info.Subdomain,
-		Endpoint:  endpoint,
-		TCPPort:   info.TCPPort,
-		Source:    RouteSourceWellKnown,
+		Endpoint: endpoint,
+		TCPPort:  info.TCPPort,
+		Source:   RouteSourceWellKnown,
 		Process: &ProcessInfo{
 			PID:         pid,
 			IsWellKnown: true,
@@ -259,14 +258,13 @@ func (w *ProcessWatcher) addWellKnownProcess(state *scanState, pid int, endpoint
 	state.usedPorts[port] = true
 }
 
-func (w *ProcessWatcher) addListeningProcess(state *scanState, pid int, endpoint netip.AddrPort, result subdomainResult, cwd string) {
+func (w *ProcessWatcher) addListeningProcess(state *scanState, pid int, endpoint netip.AddrPort, result pathResult, cwd string) {
 	if state.seenPID[pid] {
 		return
 	}
 	state.results = append(state.results, DiscoveredService{
-		Subdomain: result.subdomain,
-		Endpoint:  endpoint,
-		Source:    RouteSourceProcess,
+		Endpoint: endpoint,
+		Source:   RouteSourceProcess,
 		Process: &ProcessInfo{
 			PID:                pid,
 			Cwd:                cwd,
@@ -287,42 +285,39 @@ func (w *ProcessWatcher) handleOutsideBasePath(state *scanState, pid int, endpoi
 	w.addWellKnownProcess(state, pid, endpoint)
 }
 
-type subdomainResult struct {
-	subdomain          string
+type pathResult struct {
 	needsCustomMapping bool
 	topLevelFolder     string
 	relativePath       string
 }
 
-func (w *ProcessWatcher) buildSubdomain(basePath string, cwd string, ignoredDirs map[string]bool) subdomainResult {
+func (w *ProcessWatcher) resolvePathInfo(basePath string, cwd string, ignoredDirs map[string]bool) pathResult {
 	rel, err := filepath.Rel(basePath, cwd)
 	if err != nil {
-		return subdomainResult{}
+		return pathResult{}
 	}
 
 	parts := strings.Split(rel, string(filepath.Separator))
 	if len(parts) == 0 || parts[0] == "" || parts[0] == "." {
-		return subdomainResult{}
+		return pathResult{}
 	}
 
 	filteredParts := w.filterPathParts(parts, ignoredDirs)
 	if len(filteredParts) == 0 {
-		return subdomainResult{}
+		return pathResult{}
 	}
 
 	topLevel := filteredParts[0]
 
 	if len(filteredParts) == 1 {
-		return subdomainResult{
-			subdomain:          topLevel,
+		return pathResult{
 			needsCustomMapping: false,
 			topLevelFolder:     topLevel,
 			relativePath:       topLevel,
 		}
 	}
 
-	return subdomainResult{
-		subdomain:          topLevel,
+	return pathResult{
 		needsCustomMapping: true,
 		topLevelFolder:     topLevel,
 		relativePath:       strings.Join(filteredParts, "/"),
@@ -365,10 +360,6 @@ func (w *ProcessWatcher) discoverNewServices(targets []netip.AddrPort) {
 			log.Printf("process: discovered service %s protocol=%s", s.Endpoint.String(), s.Protocol)
 		}
 
-		type serviceKey struct {
-			IP   string
-			Port int
-		}
 		serviceByKey := make(map[netip.AddrPort]*ServiceInfo)
 		for i, svc := range services {
 			key := svc.Endpoint
