@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-func (w *ProcessWatcher) getListeningPorts() ([]portEntry, error) {
+func (w *ProcessWatcher) getListeningPorts() ([]listener, error) {
 	cmd := exec.CommandContext(w.ctx, "lsof", "-i", "-P", "-n", "-sTCP:LISTEN")
 	output, err := cmd.Output()
 	if err != nil {
@@ -21,7 +21,7 @@ func (w *ProcessWatcher) getListeningPorts() ([]portEntry, error) {
 		return nil, err
 	}
 
-	var result []portEntry
+	var result []listener
 	scanner := bufio.NewScanner(strings.NewReader(string(output)))
 
 	for scanner.Scan() {
@@ -69,7 +69,7 @@ func (w *ProcessWatcher) getListeningPorts() ([]portEntry, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse endpoint: %w", err)
 		}
-		result = append(result, portEntry{PID: pid, Endpoint: endpoint})
+		result = append(result, listener{PID: pid, Endpoint: endpoint})
 	}
 
 	return result, nil

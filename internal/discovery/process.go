@@ -13,7 +13,7 @@ import (
 type Pid = int
 type ProcessMap = map[Pid]DiscoveredService
 
-type portEntry struct {
+type listener struct {
 	Endpoint netip.AddrPort
 	PID      int
 }
@@ -167,86 +167,36 @@ func (w *ProcessWatcher) getNewTargets(services []DiscoveredService) []netip.Add
 	return newTargets
 }
 
-func (w *ProcessWatcher) scan() ([]DiscoveredService, error) {
-	listeners, err := w.getListeningPorts()
-	if err != nil {
-		log.Printf("process: getListeningPorts error: %v", err)
-		return nil, err
-	}
-
-	state := &scanState{
-		ignoredDirs: map[string]bool{"apps": true, "packages": true},
-		usedPorts:   make(map[uint16]bool),
-		seenPID:     make(map[int]bool),
-		cwdCache:    make(map[int]string),
-	}
-
-	for _, entry := range listeners {
-		w.processEntry(state, entry)
-	}
-
-	return state.results, nil
-}
-
 type scanState struct {
 	ignoredDirs map[string]bool
 	usedPorts   map[uint16]bool
 	seenPID     map[int]bool
 	cwdCache    map[int]string
-	results     []DiscoveredService
 }
 
-func (w *ProcessWatcher) processEntry(state *scanState, entry portEntry) {
-	pid := entry.PID
-
-	cwd := w.getOrCacheCWD(state, pid)
-
-	if cwd == "" {
-		log.Printf("process: PID=%d has no CWD, trying well-known", pid)
-		w.handleUnknownCWD(state, pid, entry.Endpoint)
-		return
-	}
-
-	basePath := w.findMatchingBasePath(cwd)
-	if basePath == "" {
-		w.handleOutsideBasePath(state, pid, entry.Endpoint)
-		return
-	}
-
-	result := w.resolvePathInfo(basePath, cwd, state.ignoredDirs)
-	if result.topLevelFolder == "" && !result.needsCustomMapping {
-		return
-	}
-
-	w.addListeningProcess(state, pid, entry.Endpoint, result, cwd)
-	state.usedPorts[entry.Endpoint.Port()] = true
+type pathResult struct {
+	needsCustomMapping bool
+	topLevelFolder     string
+	relativePath       string
 }
 
-func (w *ProcessWatcher) getOrCacheCWD(state *scanState, pid int) string {
-	if cwd, cached := state.cwdCache[pid]; cached {
-		return cwd
+func newScanState() *scanState {
+	return &scanState{
+		ignoredDirs: map[string]bool{"apps": true, "packages": true},
+		usedPorts:   make(map[uint16]bool),
+		seenPID:     make(map[int]bool),
+		cwdCache:    make(map[int]string),
 	}
-	cwd := w.getProcCwd(pid)
-	state.cwdCache[pid] = cwd
-	return cwd
 }
 
-func (w *ProcessWatcher) findMatchingBasePath(cwd string) string {
-	for _, basePath := range w.basePaths {
-		if strings.HasPrefix(cwd, basePath) {
-			return basePath
-		}
-	}
-	return ""
-}
-
-func (w *ProcessWatcher) addWellKnownProcess(state *scanState, pid int, endpoint netip.AddrPort) {
+func (s *scanState) tryWellKnown(pid int, endpoint netip.AddrPort) *DiscoveredService {
 	port := endpoint.Port()
 	info, ok := WellKnownPorts[port]
-	if !ok || state.usedPorts[port] {
-		return
+	if !ok || s.usedPorts[port] {
+		return nil
 	}
-	state.results = append(state.results, DiscoveredService{
+	s.usedPorts[port] = true
+	return &DiscoveredService{
 		Endpoint: endpoint,
 		TCPPort:  info.TCPPort,
 		Source:   RouteSourceWellKnown,
@@ -254,15 +204,16 @@ func (w *ProcessWatcher) addWellKnownProcess(state *scanState, pid int, endpoint
 			PID:         pid,
 			IsWellKnown: true,
 		},
-	})
-	state.usedPorts[port] = true
+	}
 }
 
-func (w *ProcessWatcher) addListeningProcess(state *scanState, pid int, endpoint netip.AddrPort, result pathResult, cwd string) {
-	if state.seenPID[pid] {
-		return
+func (s *scanState) tryListeningProcess(pid int, endpoint netip.AddrPort, result pathResult, cwd string) *DiscoveredService {
+	if s.seenPID[pid] {
+		return nil
 	}
-	state.results = append(state.results, DiscoveredService{
+	s.seenPID[pid] = true
+	s.usedPorts[endpoint.Port()] = true
+	return &DiscoveredService{
 		Endpoint: endpoint,
 		Source:   RouteSourceProcess,
 		Process: &ProcessInfo{
@@ -273,25 +224,10 @@ func (w *ProcessWatcher) addListeningProcess(state *scanState, pid int, endpoint
 			TopLevelFolder:     result.topLevelFolder,
 			RelativePath:       result.relativePath,
 		},
-	})
-	state.seenPID[pid] = true
+	}
 }
 
-func (w *ProcessWatcher) handleUnknownCWD(state *scanState, pid int, endpoint netip.AddrPort) {
-	w.addWellKnownProcess(state, pid, endpoint)
-}
-
-func (w *ProcessWatcher) handleOutsideBasePath(state *scanState, pid int, endpoint netip.AddrPort) {
-	w.addWellKnownProcess(state, pid, endpoint)
-}
-
-type pathResult struct {
-	needsCustomMapping bool
-	topLevelFolder     string
-	relativePath       string
-}
-
-func (w *ProcessWatcher) resolvePathInfo(basePath string, cwd string, ignoredDirs map[string]bool) pathResult {
+func (s *scanState) resolvePathInfo(basePath string, cwd string) pathResult {
 	rel, err := filepath.Rel(basePath, cwd)
 	if err != nil {
 		return pathResult{}
@@ -302,36 +238,82 @@ func (w *ProcessWatcher) resolvePathInfo(basePath string, cwd string, ignoredDir
 		return pathResult{}
 	}
 
-	filteredParts := w.filterPathParts(parts, ignoredDirs)
+	var filteredParts []string
+	for _, p := range parts {
+		if p != "" && p != "." && !s.ignoredDirs[p] {
+			filteredParts = append(filteredParts, p)
+		}
+	}
 	if len(filteredParts) == 0 {
 		return pathResult{}
 	}
 
 	topLevel := filteredParts[0]
 
-	if len(filteredParts) == 1 {
-		return pathResult{
-			needsCustomMapping: false,
-			topLevelFolder:     topLevel,
-			relativePath:       topLevel,
-		}
-	}
-
 	return pathResult{
-		needsCustomMapping: true,
+		needsCustomMapping: len(filteredParts) > 1,
 		topLevelFolder:     topLevel,
 		relativePath:       strings.Join(filteredParts, "/"),
 	}
 }
 
-func (w *ProcessWatcher) filterPathParts(parts []string, ignoredDirs map[string]bool) []string {
-	var filtered []string
-	for _, p := range parts {
-		if p != "" && p != "." && !ignoredDirs[p] {
-			filtered = append(filtered, p)
+func (s *scanState) getCwd(pid int, lookup func(int) string) string {
+	if cwd, cached := s.cwdCache[pid]; cached {
+		return cwd
+	}
+	cwd := lookup(pid)
+	s.cwdCache[pid] = cwd
+	return cwd
+}
+
+func (w *ProcessWatcher) scan() ([]DiscoveredService, error) {
+	listeners, err := w.getListeningPorts()
+	if err != nil {
+		log.Printf("process: getListeningPorts error: %v", err)
+		return nil, err
+	}
+
+	state := newScanState()
+	var results []DiscoveredService
+
+	for _, entry := range listeners {
+		if svc := w.classifyListener(state, entry); svc != nil {
+			results = append(results, *svc)
 		}
 	}
-	return filtered
+
+	return results, nil
+}
+
+func (w *ProcessWatcher) classifyListener(state *scanState, entry listener) *DiscoveredService {
+	pid := entry.PID
+	cwd := state.getCwd(pid, w.getProcCwd)
+
+	if cwd == "" {
+		log.Printf("process: PID=%d has no CWD, trying well-known", pid)
+		return state.tryWellKnown(pid, entry.Endpoint)
+	}
+
+	basePath := w.findMatchingBasePath(cwd)
+	if basePath == "" {
+		return state.tryWellKnown(pid, entry.Endpoint)
+	}
+
+	result := state.resolvePathInfo(basePath, cwd)
+	if result.topLevelFolder == "" {
+		return nil
+	}
+
+	return state.tryListeningProcess(pid, entry.Endpoint, result, cwd)
+}
+
+func (w *ProcessWatcher) findMatchingBasePath(cwd string) string {
+	for _, basePath := range w.basePaths {
+		if strings.HasPrefix(cwd, basePath) {
+			return basePath
+		}
+	}
+	return ""
 }
 
 func (w *ProcessWatcher) discoverNewServices(targets []netip.AddrPort) {
@@ -369,9 +351,8 @@ func (w *ProcessWatcher) discoverNewServices(targets []netip.AddrPort) {
 		w.mu.Lock()
 		updated := false
 		for pid, svc := range w.current {
-			key := svc
-			if info, ok := serviceByKey[key.Endpoint]; ok {
-				log.Printf("process: assigning ServiceInfo to %s (pid %d): protocol=%s", svc.Subdomain, pid, info.Protocol)
+			if info, ok := serviceByKey[svc.Endpoint]; ok {
+				log.Printf("process: assigning ServiceInfo to %s (pid %d): protocol=%s", svc.Endpoint, pid, info.Protocol)
 				svc.Service = info
 				w.current[pid] = svc
 				updated = true

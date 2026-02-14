@@ -31,7 +31,7 @@ package discovery
 // 	"unsafe"
 // )
 
-// func (w *ProcessWatcher) getListeningPorts() ([]portEntry, error) {
+// func (w *ProcessWatcher) getListeningPorts() ([]listener, error) {
 // 	cmd := exec.CommandContext(w.ctx, "lsof", "-i", "-P", "-n", "-sTCP:LISTEN")
 // 	output, err := cmd.Output()
 // 	if err != nil {
@@ -41,7 +41,7 @@ package discovery
 // 		return nil, err
 // 	}
 
-// 	var result []portEntry
+// 	var result []listener
 // 	scanner := bufio.NewScanner(strings.NewReader(string(output)))
 
 // 	for scanner.Scan() {
@@ -89,7 +89,7 @@ package discovery
 // 		if err != nil {
 // 			continue
 // 		}
-// 		result = append(result, portEntry{PID: pid, Endpoint: netip.AddrPortFrom(addr, uint16(port))})
+// 		result = append(result, listener{PID: pid, Endpoint: netip.AddrPortFrom(addr, uint16(port))})
 // 	}
 
 // 	return result, nil

@@ -17,7 +17,7 @@ func hexByte(s string) int {
 	return int(i)
 }
 
-func (w *ProcessWatcher) getListeningPorts() ([]portEntry, error) {
+func (w *ProcessWatcher) getListeningPorts() ([]listener, error) {
 	entries, err := w.parseProcNet("/proc/net/tcp")
 	if err != nil {
 		fmt.Printf("Error parsing /proc/net/tcp: %v\n", err)
@@ -34,7 +34,7 @@ func (w *ProcessWatcher) getListeningPorts() ([]portEntry, error) {
 	return entries, nil
 }
 
-func (w *ProcessWatcher) parseProcNet(path string) ([]portEntry, error) {
+func (w *ProcessWatcher) parseProcNet(path string) ([]listener, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -65,7 +65,7 @@ func (w *ProcessWatcher) parseProcNet(path string) ([]portEntry, error) {
 	}
 	fmt.Printf("Mapped %d inodes to PIDs\n", len(inodeToPID))
 
-	var result []portEntry
+	var result []listener
 	scanner := bufio.NewScanner(file)
 	scanner.Scan()
 
@@ -126,7 +126,7 @@ func (w *ProcessWatcher) parseProcNet(path string) ([]portEntry, error) {
 			fmt.Printf("Skipping invalid IP %s: %v\n", ipStr, err)
 			continue
 		}
-		result = append(result, portEntry{PID: pid, Endpoint: netip.AddrPortFrom(addr, uint16(port))})
+		result = append(result, listener{PID: pid, Endpoint: netip.AddrPortFrom(addr, uint16(port))})
 	}
 
 	return result, nil
