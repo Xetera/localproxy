@@ -137,10 +137,11 @@ var (
 	connectionEventsMu sync.RWMutex
 )
 
+var PgMessageSink chan<- protocol.PgMessage
+
 type TapHandler struct {
 	ParseProtocol bool `json:"parse_protocol,omitempty"`
 	logger        *zap.Logger
-	pgLog         *protocol.PgMessageLog
 }
 
 func (TapHandler) CaddyModule() caddy.ModuleInfo {
@@ -152,7 +153,6 @@ func (TapHandler) CaddyModule() caddy.ModuleInfo {
 
 func (h *TapHandler) Provision(ctx caddy.Context) error {
 	h.logger = ctx.Logger()
-	h.pgLog = protocol.NewPgMessageLog(1000)
 	return nil
 }
 
@@ -196,7 +196,6 @@ func (h *TapHandler) Handle(cx *layer4.Connection, next layer4.Handler) error {
 		logger:     h.logger,
 		parseProto: addressParsed && h.ParseProtocol,
 		addrPort:   remoteAddrPort,
-		pgLog:      h.pgLog,
 	}
 	cx.Conn = wrapped
 
@@ -238,7 +237,6 @@ type tappedConn struct {
 	logger     *zap.Logger
 	parseProto bool
 	addrPort   netip.AddrPort
-	pgLog      *protocol.PgMessageLog
 }
 
 func (c *tappedConn) Read(p []byte) (n int, err error) {
@@ -246,7 +244,13 @@ func (c *tappedConn) Read(p []byte) (n int, err error) {
 	c.bytesIn += int64(n)
 	if n > 0 && c.parseProto {
 		if msg := protocol.ParseFrontendMessage(p[:n]); msg != nil {
-			c.pgLog.Record(c.addrPort, *msg)
+			msg.Endpoint = c.addrPort
+			if PgMessageSink != nil {
+				select {
+				case PgMessageSink <- *msg:
+				default:
+				}
+			}
 			c.logger.Info("pg frontend message",
 				zap.String("type", msg.Type),
 				zap.Any("details", msg.Details),
@@ -261,7 +265,13 @@ func (c *tappedConn) Write(p []byte) (n int, err error) {
 	c.bytesOut += int64(n)
 	if n > 0 && c.parseProto {
 		if msg := protocol.ParseBackendMessage(p[:n]); msg != nil {
-			c.pgLog.Record(c.addrPort, *msg)
+			msg.Endpoint = c.addrPort
+			if PgMessageSink != nil {
+				select {
+				case PgMessageSink <- *msg:
+				default:
+				}
+			}
 			c.logger.Info("pg backend message",
 				zap.String("type", msg.Type),
 				zap.Any("details", msg.Details),

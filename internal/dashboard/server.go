@@ -19,6 +19,7 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/xetera/localproxy/internal/discovery"
+	"github.com/xetera/localproxy/internal/proxy/protocol"
 )
 
 const (
@@ -95,13 +96,19 @@ type DashboardServer struct {
 	unroutedContainers []UnroutedContainer
 	registry           RegistryInterface
 	store              StoreInterface
+	pgLog              *protocol.PgMessageLog
+	pgMessages         <-chan protocol.PgMessage
+	stopPgDrain        chan struct{}
 }
 
-func NewDashboardServer(basePaths []string, traceProcessLogs bool) *DashboardServer {
+func NewDashboardServer(basePaths []string, traceProcessLogs bool, pgMessages <-chan protocol.PgMessage) *DashboardServer {
 	s := &DashboardServer{
-		backends:   make(map[string]Backend),
-		logManager: NewLogManager(traceProcessLogs),
-		basePaths:  basePaths,
+		backends:    make(map[string]Backend),
+		logManager:  NewLogManager(traceProcessLogs),
+		basePaths:   basePaths,
+		pgLog:       protocol.NewPgMessageLog(1000),
+		pgMessages:  pgMessages,
+		stopPgDrain: make(chan struct{}),
 	}
 
 	mux := http.NewServeMux()
@@ -231,13 +238,31 @@ func (s *DashboardServer) Start() error {
 			log.Printf("dashboard server error: %v", err)
 		}
 	}()
+	if s.pgMessages != nil {
+		go s.drainPgMessages()
+	}
 	return nil
+}
+
+func (s *DashboardServer) drainPgMessages() {
+	for {
+		select {
+		case msg, ok := <-s.pgMessages:
+			if !ok {
+				return
+			}
+			s.pgLog.Record(msg.Endpoint, msg)
+		case <-s.stopPgDrain:
+			return
+		}
+	}
 }
 
 func (s *DashboardServer) Stop() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	close(s.stopPgDrain)
 	s.logManager.Stop()
 	return s.server.Shutdown(ctx)
 }

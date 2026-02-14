@@ -20,6 +20,7 @@ import (
 	"github.com/xetera/localproxy/internal/hosts"
 	"github.com/xetera/localproxy/internal/notification"
 	"github.com/xetera/localproxy/internal/proxy"
+	"github.com/xetera/localproxy/internal/proxy/protocol"
 	"github.com/xetera/localproxy/internal/registry"
 )
 
@@ -149,8 +150,11 @@ func (d *CaddyDaemon) initRouting() error {
 	}
 	d.store = store
 
+	pgCh := make(chan protocol.PgMessage, 256)
+	PgMessageSink = pgCh
+
 	basePaths := d.getBasePaths()
-	d.dashboardServer = dashboard.NewDashboardServer(basePaths, d.config.TraceProcessLogs)
+	d.dashboardServer = dashboard.NewDashboardServer(basePaths, d.config.TraceProcessLogs, pgCh)
 	d.routeRegistry = registry.NewRouteRegistry(d.onRoutesChanged, d.store)
 
 	d.dashboardServer.SetRegistry(d.routeRegistry)

@@ -18,11 +18,12 @@ const (
 )
 
 type PgMessage struct {
-	Timestamp time.Time `json:"timestamp"`
-	Direction Direction `json:"direction"`
-	Type      string    `json:"type"`
-	Details   any       `json:"details,omitempty"`
-	Raw       []byte    `json:"-"`
+	Timestamp time.Time      `json:"timestamp"`
+	Direction Direction       `json:"direction"`
+	Type      string          `json:"type"`
+	Details   any             `json:"details,omitempty"`
+	Endpoint  netip.AddrPort  `json:"endpoint"`
+	Raw       []byte          `json:"-"`
 }
 
 type PgMessageLog struct {
