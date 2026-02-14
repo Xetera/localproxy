@@ -245,11 +245,9 @@ type tappedConn struct {
 func (c *tappedConn) Read(p []byte) (n int, err error) {
 	n, err = c.Conn.Read(p)
 	c.bytesIn += int64(n)
-	fmt.Println(n, c.parseProto)
 	if n > 0 && c.parseProto {
-		if msg := protocol.ParseFrontendMessage(p[:n]); msg != nil {
+		for _, msg := range protocol.ParseFrontendMessages(p[:n]) {
 			msg.Endpoint = c.addrPort
-			fmt.Println(msg)
 			if PgMessageSink != nil {
 				select {
 				case PgMessageSink <- *msg:
@@ -269,7 +267,7 @@ func (c *tappedConn) Write(p []byte) (n int, err error) {
 	n, err = c.Conn.Write(p)
 	c.bytesOut += int64(n)
 	if n > 0 && c.parseProto {
-		if msg := protocol.ParseBackendMessage(p[:n]); msg != nil {
+		for _, msg := range protocol.ParseBackendMessages(p[:n]) {
 			msg.Endpoint = c.addrPort
 			if PgMessageSink != nil {
 				select {

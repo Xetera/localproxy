@@ -2,7 +2,6 @@ package discovery
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net/netip"
 	"time"
@@ -48,7 +47,6 @@ func ProbeEndpoints(ctx context.Context, addrs []netip.AddrPort, results chan<- 
 			for _, target := range t {
 				log.Printf("	Scanning target %s\n", target.Address.String())
 			}
-			fmt.Println(t)
 			scanned, err := scan.ScanTargets(t, scan.Config{
 				UDP:            false,
 				FastMode:       false,

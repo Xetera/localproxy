@@ -333,6 +333,50 @@ func ParseBackendMessage(data []byte) *PgMessage {
 	return msg
 }
 
+func ParseFrontendMessages(data []byte) []*PgMessage {
+	if len(data) < 4 {
+		return nil
+	}
+	if isStartupMessage(data) {
+		msg := ParseFrontendMessage(data)
+		if msg == nil {
+			return nil
+		}
+		return []*PgMessage{msg}
+	}
+	var msgs []*PgMessage
+	for len(data) >= 5 {
+		msgLen := int(data[1])<<24 | int(data[2])<<16 | int(data[3])<<8 | int(data[4])
+		totalLen := 1 + msgLen
+		if totalLen < 5 || totalLen > len(data) {
+			break
+		}
+		msg := ParseFrontendMessage(data[:totalLen])
+		if msg != nil {
+			msgs = append(msgs, msg)
+		}
+		data = data[totalLen:]
+	}
+	return msgs
+}
+
+func ParseBackendMessages(data []byte) []*PgMessage {
+	var msgs []*PgMessage
+	for len(data) >= 5 {
+		msgLen := int(data[1])<<24 | int(data[2])<<16 | int(data[3])<<8 | int(data[4])
+		totalLen := 1 + msgLen
+		if totalLen < 5 || totalLen > len(data) {
+			break
+		}
+		msg := ParseBackendMessage(data[:totalLen])
+		if msg != nil {
+			msgs = append(msgs, msg)
+		}
+		data = data[totalLen:]
+	}
+	return msgs
+}
+
 func isStartupMessage(data []byte) bool {
 	if len(data) < 8 {
 		return false
