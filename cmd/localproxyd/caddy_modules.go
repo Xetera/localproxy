@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/netip"
@@ -13,7 +14,9 @@ import (
 	"github.com/caddyserver/caddy/v2/modules/caddytls"
 	"github.com/mholt/caddy-l4/layer4"
 	"github.com/mholt/caddy-l4/modules/l4proxy"
+	_ "github.com/mholt/caddy-l4/modules/l4postgres"
 	"github.com/mholt/caddy-l4/modules/l4tls"
+	"github.com/xetera/localproxy/internal/proxy"
 	"github.com/xetera/localproxy/internal/proxy/protocol"
 	"go.uber.org/zap"
 )
@@ -293,46 +296,63 @@ func mustHandler(name string, h any) json.RawMessage {
 	return out
 }
 
-func BuildL4Config(certPath string) (*layer4.App, error) {
-	tlsHandler := &l4tls.Handler{
-		ConnectionPolicies: caddytls.ConnectionPolicies{
-			&caddytls.ConnectionPolicy{
-				ALPN: []string{"postgresql"},
-			},
-		},
-	}
+func BuildL4App(routes []proxy.Route) *layer4.App {
+	servers := make(map[string]*layer4.Server)
 
-	proxyHandler := &l4proxy.Handler{
-		Upstreams: l4proxy.UpstreamPool{
-			&l4proxy.Upstream{
-				Dial: []string{"localhost:5555"},
-			},
-		},
-	}
+	for _, r := range routes {
+		if r.TCPPort <= 0 {
+			continue
+		}
 
-	return &layer4.App{
-		Servers: map[string]*layer4.Server{
-			"postgres_proxy": {
-				Listen: []string{"tcp/:5432"},
-				Routes: layer4.RouteList{
-					&layer4.Route{
-						MatcherSetsRaw: []caddy.ModuleMap{
-							{"tls": json.RawMessage(`{}`)},
-						},
-						HandlersRaw: []json.RawMessage{
-							mustHandler("tls", tlsHandler),
-							mustHandler("tap", &TapHandler{ParseProtocol: true}),
-							mustHandler("proxy", proxyHandler),
-						},
-					},
-					&layer4.Route{
-						HandlersRaw: []json.RawMessage{
-							mustHandler("tap", &TapHandler{ParseProtocol: true}),
-							mustHandler("proxy", proxyHandler),
-						},
-					},
+		proxyHandler := &l4proxy.Handler{
+			Upstreams: l4proxy.UpstreamPool{
+				&l4proxy.Upstream{
+					Dial: []string{r.Endpoint.String()},
 				},
 			},
-		},
-	}, nil
+		}
+
+		tlsHandler := &l4tls.Handler{
+			ConnectionPolicies: caddytls.ConnectionPolicies{
+				&caddytls.ConnectionPolicy{},
+			},
+		}
+
+		parseProto := r.ServiceProtocol == "postgres"
+
+		tlsRoute := &layer4.Route{
+			MatcherSetsRaw: []caddy.ModuleMap{
+				{"tls": json.RawMessage(`{}`)},
+			},
+			HandlersRaw: []json.RawMessage{
+				mustHandler("tls", tlsHandler),
+				mustHandler("tap", &TapHandler{ParseProtocol: parseProto}),
+				mustHandler("proxy", proxyHandler),
+			},
+		}
+
+		fallbackRoute := &layer4.Route{
+			HandlersRaw: []json.RawMessage{
+				mustHandler("tap", &TapHandler{ParseProtocol: parseProto}),
+				mustHandler("proxy", proxyHandler),
+			},
+		}
+
+		if parseProto {
+			fallbackRoute.MatcherSetsRaw = []caddy.ModuleMap{
+				{"postgres": json.RawMessage(`{}`)},
+			}
+		}
+
+		servers[fmt.Sprintf("tcp_%s", r.Subdomain)] = &layer4.Server{
+			Listen: []string{fmt.Sprintf("tcp/:%d", r.TCPPort)},
+			Routes: layer4.RouteList{tlsRoute, fallbackRoute},
+		}
+	}
+
+	if len(servers) == 0 {
+		return nil
+	}
+
+	return &layer4.App{Servers: servers}
 }

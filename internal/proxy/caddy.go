@@ -166,7 +166,7 @@ func BuildCaddyConfig(routes []Route, httpsRedirect bool) (*caddyhttp.App, *cadd
 	return httpApp, tlsApp
 }
 
-func BuildFullCaddyConfig(routes []Route, adminSocket string, httpsRedirect bool, logLevel string) (*caddy.Config, error) {
+func BuildFullCaddyConfig(routes []Route, adminSocket string, httpsRedirect bool, logLevel string, l4JSON json.RawMessage) (*caddy.Config, error) {
 	httpApp, tlsApp := BuildCaddyConfig(routes, httpsRedirect)
 
 	httpJSON, err := json.Marshal(httpApp)
@@ -177,6 +177,14 @@ func BuildFullCaddyConfig(routes []Route, adminSocket string, httpsRedirect bool
 	tlsJSON, err := json.Marshal(tlsApp)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal tls config: %w", err)
+	}
+
+	appsRaw := caddy.ModuleMap{
+		"http": httpJSON,
+		"tls":  tlsJSON,
+	}
+	if l4JSON != nil {
+		appsRaw["layer4"] = l4JSON
 	}
 
 	cfg := &caddy.Config{
@@ -193,10 +201,7 @@ func BuildFullCaddyConfig(routes []Route, adminSocket string, httpsRedirect bool
 		Admin: &caddy.AdminConfig{
 			Listen: "unix/" + adminSocket,
 		},
-		AppsRaw: caddy.ModuleMap{
-			"http": httpJSON,
-			"tls":  tlsJSON,
-		},
+		AppsRaw: appsRaw,
 	}
 
 	return cfg, nil

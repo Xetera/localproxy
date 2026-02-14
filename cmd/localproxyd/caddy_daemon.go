@@ -218,7 +218,16 @@ func (d *CaddyDaemon) startCaddy() error {
 		},
 	}
 
-	cfg, err := proxy.BuildFullCaddyConfig(routes, adminSocket, d.config.HTTPSRedirect, d.config.LogLevel)
+	var l4JSON json.RawMessage
+	if l4App := BuildL4App(routes); l4App != nil {
+		var err error
+		l4JSON, err = json.Marshal(l4App)
+		if err != nil {
+			return fmt.Errorf("failed to marshal l4 config: %w", err)
+		}
+	}
+
+	cfg, err := proxy.BuildFullCaddyConfig(routes, adminSocket, d.config.HTTPSRedirect, d.config.LogLevel, l4JSON)
 	if err != nil {
 		return fmt.Errorf("failed to build caddy config: %w", err)
 	}
@@ -295,7 +304,17 @@ func (d *CaddyDaemon) onRoutesChanged(routes []proxy.Route, backends []dashboard
 		subdomains = append(subdomains, r.Subdomain)
 	}
 
-	cfg, err := proxy.BuildFullCaddyConfig(caddyRoutes, adminSocket, d.config.HTTPSRedirect, d.config.LogLevel)
+	var l4JSON json.RawMessage
+	if l4App := BuildL4App(routes); l4App != nil {
+		var marshalErr error
+		l4JSON, marshalErr = json.Marshal(l4App)
+		if marshalErr != nil {
+			log.Printf("failed to marshal l4 config: %v", marshalErr)
+			return
+		}
+	}
+
+	cfg, err := proxy.BuildFullCaddyConfig(caddyRoutes, adminSocket, d.config.HTTPSRedirect, d.config.LogLevel, l4JSON)
 	if err != nil {
 		log.Printf("failed to build caddy config: %v", err)
 		return
