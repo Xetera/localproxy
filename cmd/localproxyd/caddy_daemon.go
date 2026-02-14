@@ -349,13 +349,6 @@ func (d *CaddyDaemon) onDockerChanged(services []discovery.DiscoveredService) {
 		})
 	}
 
-	if d.processWatcher != nil {
-		ports := make([]uint16, 0, len(services))
-		for _, s := range services {
-			ports = append(ports, s.Endpoint.Port())
-		}
-		d.processWatcher.SetDockerPorts(ports)
-	}
 }
 
 func (d *CaddyDaemon) onDockerHealthy(svc discovery.DiscoveredService) {

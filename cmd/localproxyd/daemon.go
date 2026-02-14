@@ -240,13 +240,6 @@ func (d *Daemon) onDockerChanged(services []discovery.DiscoveredService) {
 		})
 	}
 
-	if d.processWatcher != nil {
-		ports := make([]uint16, 0, len(services))
-		for _, s := range services {
-			ports = append(ports, s.Endpoint.Port())
-		}
-		d.processWatcher.SetDockerPorts(ports)
-	}
 }
 
 func (d *Daemon) onDockerHealthy(svc discovery.DiscoveredService) {

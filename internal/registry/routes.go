@@ -183,7 +183,6 @@ func (r *RouteRegistry) getRoutesLocked() ([]proxy.Route, []dashboard.Backend) {
 			backend.Cwd = svc.Process.Cwd
 			backend.Disabled = svc.Process.Disabled
 			backend.NeedsCustomMapping = svc.Process.NeedsCustomMapping
-			backend.IsDocker = svc.Process.IsDocker
 			backend.TopLevelFolder = svc.Process.TopLevelFolder
 			backend.RelativePath = svc.Process.RelativePath
 			topFolder := svc.Process.TopLevelFolder
@@ -194,6 +193,7 @@ func (r *RouteRegistry) getRoutesLocked() ([]proxy.Route, []dashboard.Backend) {
 		}
 
 		if svc.Docker != nil {
+			backend.IsDocker = true
 			backend.DockerContainerID = svc.Docker.ID
 			backend.DockerHasAutoName = !svc.Docker.HasCustomName
 			backend.DockerPorts = svc.Docker.Ports

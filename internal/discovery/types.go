@@ -28,7 +28,6 @@ type ProcessInfo struct {
 	Disabled           bool
 	NeedsCustomMapping bool
 	IsWellKnown        bool
-	IsDocker           bool
 	TopLevelFolder     string
 	RelativePath       string
 }

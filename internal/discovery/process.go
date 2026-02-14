@@ -10,56 +10,54 @@ import (
 	"time"
 )
 
+type Pid = int
+type ProcessMap = map[Pid]DiscoveredService
+
 type portEntry struct {
 	Endpoint netip.AddrPort
 	PID      int
 }
 
 type ProcessWatcher struct {
-	basePaths   []string
-	onChange    func([]DiscoveredService)
-	ctx         context.Context
-	cancel      context.CancelFunc
-	mu          sync.RWMutex
-	current     map[int]DiscoveredService
-	dockerPorts map[uint16]bool
+	basePaths []string
+	onChange  func([]DiscoveredService)
+	ctx       context.Context
+	cancel    context.CancelFunc
+	mu        sync.RWMutex
+	current   ProcessMap
 }
 
-type Pid = int
-type ProcessMap = map[Pid]DiscoveredService
-
-func NewProcessWatcher(basePaths []string) (*ProcessWatcher, error) {
-	ctx, cancel := context.WithCancel(context.Background())
+func resolveToAbsolutePaths(basePaths []string) ([]string, error) {
 	absPaths := make([]string, 0, len(basePaths))
 	for _, p := range basePaths {
 		absPath, err := filepath.Abs(p)
 		if err != nil {
-			cancel()
 			return nil, err
 		}
 		absPaths = append(absPaths, absPath)
 	}
+	return absPaths, nil
+}
+
+func NewProcessWatcher(basePaths []string) (*ProcessWatcher, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+	absPaths, err := resolveToAbsolutePaths(basePaths)
+
+	if err != nil {
+		cancel()
+		return nil, err
+	}
 
 	return &ProcessWatcher{
-		basePaths:   absPaths,
-		ctx:         ctx,
-		cancel:      cancel,
-		current:     make(ProcessMap),
-		dockerPorts: make(map[uint16]bool),
+		basePaths: absPaths,
+		ctx:       ctx,
+		cancel:    cancel,
+		current:   make(ProcessMap),
 	}, nil
 }
 
 func (w *ProcessWatcher) SetOnChange(fn func([]DiscoveredService)) {
 	w.onChange = fn
-}
-
-func (w *ProcessWatcher) SetDockerPorts(ports []uint16) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.dockerPorts = make(map[uint16]bool)
-	for _, port := range ports {
-		w.dockerPorts[port] = true
-	}
 }
 
 func (w *ProcessWatcher) Start() error {
@@ -68,14 +66,7 @@ func (w *ProcessWatcher) Start() error {
 		return err
 	}
 
-	w.mu.Lock()
-	w.current = make(ProcessMap)
-	for _, s := range services {
-		if s.Process != nil {
-			w.current[s.Process.PID] = s
-		}
-	}
-	w.mu.Unlock()
+	w.setProcesses(services)
 
 	initialTargets := make([]netip.AddrPort, 0, len(services))
 	for _, s := range services {
@@ -111,27 +102,12 @@ func (w *ProcessWatcher) watchLoop() {
 				continue
 			}
 
-			w.mu.Lock()
 			changed := w.isServicesChanged(services)
 			var newTargets []netip.AddrPort
 			if changed {
-				for _, s := range services {
-					if s.Process == nil {
-						continue
-					}
-					if _, ok := w.current[s.Process.PID]; !ok {
-						newTargets = append(newTargets, s.Endpoint)
-					}
-				}
-				w.current = make(map[int]DiscoveredService)
-				for _, s := range services {
-					if s.Process != nil {
-						w.current[s.Process.PID] = s
-					}
-				}
+				newTargets = w.getNewTargets(services)
+				w.setProcesses(services)
 			}
-
-			w.mu.Unlock()
 
 			if len(newTargets) > 0 {
 				w.discoverNewServices(newTargets)
@@ -145,6 +121,9 @@ func (w *ProcessWatcher) watchLoop() {
 }
 
 func (w *ProcessWatcher) isServicesChanged(services []DiscoveredService) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
 	changed := len(services) != len(w.current)
 	if !changed {
 		for _, s := range services {
@@ -158,6 +137,34 @@ func (w *ProcessWatcher) isServicesChanged(services []DiscoveredService) bool {
 		}
 	}
 	return changed
+}
+
+func (w *ProcessWatcher) setProcesses(services []DiscoveredService) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	w.current = make(ProcessMap)
+	for _, s := range services {
+		if s.Process != nil {
+			w.current[s.Process.PID] = s
+		}
+	}
+}
+
+func (w *ProcessWatcher) getNewTargets(services []DiscoveredService) []netip.AddrPort {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	var newTargets []netip.AddrPort
+	for _, s := range services {
+		if s.Process == nil {
+			continue
+		}
+		if _, ok := w.current[s.Process.PID]; !ok {
+			newTargets = append(newTargets, s.Endpoint)
+		}
+	}
+	return newTargets
 }
 
 func (w *ProcessWatcher) scan() ([]DiscoveredService, error) {
@@ -247,7 +254,6 @@ func (w *ProcessWatcher) addWellKnownProcess(state *scanState, pid int, endpoint
 		Process: &ProcessInfo{
 			PID:         pid,
 			IsWellKnown: true,
-			IsDocker:    w.dockerPorts[port],
 		},
 	})
 	state.usedPorts[port] = true
