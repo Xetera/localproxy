@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 
 	bolt "go.etcd.io/bbolt"
 )
@@ -39,7 +40,7 @@ type Store struct {
 }
 
 func NewStore(path string) (*Store, error) {
-	db, err := bolt.Open(path, 0600, nil)
+	db, err := bolt.Open(path, 0600, &bolt.Options{Timeout: 3 * time.Second})
 	if err != nil {
 		return nil, fmt.Errorf("failed to open bolt db: %w", err)
 	}
