@@ -99,16 +99,18 @@ type DashboardServer struct {
 	store              StoreInterface
 	pgLog              *protocol.PgMessageLog
 	pgMessages         <-chan protocol.PgMessage
+	packetLog          *protocol.PacketLog
 	stopPgDrain        chan struct{}
 }
 
-func NewDashboardServer(basePaths []string, traceProcessLogs bool, pgMessages <-chan protocol.PgMessage) *DashboardServer {
+func NewDashboardServer(basePaths []string, traceProcessLogs bool, pgMessages <-chan protocol.PgMessage, packetLog *protocol.PacketLog) *DashboardServer {
 	s := &DashboardServer{
 		backends:    make(map[string]Backend),
 		logManager:  NewLogManager(traceProcessLogs),
 		basePaths:   basePaths,
 		pgLog:       protocol.NewPgMessageLog(1000),
 		pgMessages:  pgMessages,
+		packetLog:   packetLog,
 		stopPgDrain: make(chan struct{}),
 	}
 
@@ -118,6 +120,7 @@ func NewDashboardServer(basePaths []string, traceProcessLogs bool, pgMessages <-
 	mux.HandleFunc("/api/logs-preview", s.serveLogsPreview)
 	mux.HandleFunc("/api/subdomain-mapping", s.handleSubdomainMapping)
 	mux.HandleFunc("/api/pg-messages", s.streamPgMessages)
+	mux.HandleFunc("/api/packets", s.streamPackets)
 
 	s.server = &http.Server{
 		Addr:    fmt.Sprintf("127.0.0.1:%d", ServerPort),
@@ -319,6 +322,53 @@ func (s *DashboardServer) streamPgMessages(w http.ResponseWriter, r *http.Reques
 			}
 			fragment := renderPgMessageHTML(msg)
 			fmt.Fprintf(w, "event: pg-message\ndata: %s\n\n", fragment)
+			flusher.Flush()
+		case <-r.Context().Done():
+			return
+		}
+	}
+}
+
+func (s *DashboardServer) streamPackets(w http.ResponseWriter, r *http.Request) {
+	if s.packetLog == nil {
+		http.Error(w, "packet capture not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	subID, ch := s.packetLog.Subscribe()
+	defer s.packetLog.Unsubscribe(subID)
+
+	for _, pkt := range s.packetLog.GetAll() {
+		data, err := json.Marshal(pkt)
+		if err != nil {
+			continue
+		}
+		fmt.Fprintf(w, "event: packet\ndata: %s\n\n", data)
+	}
+	flusher.Flush()
+
+	for {
+		select {
+		case pkt, ok := <-ch:
+			if !ok {
+				return
+			}
+			data, err := json.Marshal(pkt)
+			if err != nil {
+				continue
+			}
+			fmt.Fprintf(w, "event: packet\ndata: %s\n\n", data)
 			flusher.Flush()
 		case <-r.Context().Done():
 			return

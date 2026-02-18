@@ -830,7 +830,7 @@
             <div id="tab-pg" class="tab-content">
               <div class="pg-messages-container"
                    hx-ext="sse"
-                   sse-connect="/api/pg-messages?subdomain={{.SelectedBackend.Subdomain}}"
+                   sse-connect="/api/packets?subdomain={{.SelectedBackend.Subdomain}}"
                    sse-swap="pg-message"
                    hx-swap="beforeend">
               </div>

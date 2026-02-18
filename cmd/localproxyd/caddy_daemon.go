@@ -45,6 +45,7 @@ type CaddyDaemon struct {
 	processWatcher  *discovery.ProcessWatcher
 	dockerWatcher   *discovery.DockerWatcher
 	notifier        *notification.Notifier
+	captureManager  *protocol.CaptureManager
 
 	seenBackends   map[string]bool
 	watcherStarted bool
@@ -109,6 +110,9 @@ func (d *CaddyDaemon) Start() error {
 
 func (d *CaddyDaemon) Stop() {
 	caddy.Stop()
+	if d.captureManager != nil {
+		d.captureManager.Stop()
+	}
 	if d.store != nil {
 		d.store.Close()
 	}
@@ -153,8 +157,11 @@ func (d *CaddyDaemon) initRouting() error {
 	pgCh := make(chan protocol.PgMessage, 256)
 	PgMessageSink = pgCh
 
+	packetLog := protocol.NewPacketLog(1000)
+	d.captureManager = protocol.NewCaptureManager(packetLog)
+
 	basePaths := d.getBasePaths()
-	d.dashboardServer = dashboard.NewDashboardServer(basePaths, d.config.TraceProcessLogs, pgCh)
+	d.dashboardServer = dashboard.NewDashboardServer(basePaths, d.config.TraceProcessLogs, pgCh, packetLog)
 	d.routeRegistry = registry.NewRouteRegistry(d.onRoutesChanged, d.store)
 
 	d.dashboardServer.SetRegistry(d.routeRegistry)
@@ -335,6 +342,25 @@ func (d *CaddyDaemon) onRoutesChanged(routes []proxy.Route, backends []dashboard
 		if err := d.hostsMgr.Update(subdomains); err != nil {
 			log.Printf("failed to update hosts: %v", err)
 		}
+	}
+
+	if d.captureManager != nil {
+		wantCaptures := make(map[int]protocol.CaptureConfig)
+		for _, r := range routes {
+			if r.TCPPort <= 0 {
+				continue
+			}
+			cfg := protocol.CaptureConfig{
+				Interface: "lo0",
+				Port:      uint16(r.TCPPort),
+				Protocol:  protocol.TsharkTCP,
+			}
+			if r.ServiceProtocol == "postgres" {
+				cfg.DecodeAs = []string{"tcp.port==" + fmt.Sprintf("%d", r.TCPPort) + ",pgsql"}
+			}
+			wantCaptures[r.TCPPort] = cfg
+		}
+		d.captureManager.Sync(wantCaptures)
 	}
 
 	log.Printf("updated routes: %d active", len(routes))

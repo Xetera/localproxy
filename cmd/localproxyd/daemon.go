@@ -127,7 +127,7 @@ func (d *Daemon) initRouting() error {
 	d.store = store
 
 	basePaths := d.getBasePaths()
-	d.dashboardServer = dashboard.NewDashboardServer(basePaths, d.config.TraceProcessLogs, nil)
+	d.dashboardServer = dashboard.NewDashboardServer(basePaths, d.config.TraceProcessLogs, nil, nil)
 	d.routeRegistry = registry.NewRouteRegistry(d.onRoutesChanged, d.store)
 
 	d.dashboardServer.SetRegistry(d.routeRegistry)
