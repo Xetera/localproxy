@@ -61,8 +61,8 @@ func ProbeEndpoints(ctx context.Context, addrs []netip.AddrPort, results chan<- 
 			log.Printf("fingerprint: scan returned %d results\n", len(scanned))
 			var services []ServiceInfo
 			if len(scanned) == 0 {
-				results <- services
-				return
+				// results <- services
+				continue
 			}
 
 			for _, s := range scanned {
