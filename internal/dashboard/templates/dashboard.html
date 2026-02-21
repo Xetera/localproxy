@@ -758,10 +758,10 @@
           </div>
           <div class="logs-section">
             <input type="radio" name="tab" id="tab-select-logs" class="tab-radio" checked>
-            {{if .SelectedBackend.TCPPort}}<input type="radio" name="tab" id="tab-select-pg" class="tab-radio">{{end}}
+            {{if eq .SelectedBackend.ServiceProtocol "postgresql"}}<input type="radio" name="tab" id="tab-select-pg" class="tab-radio">{{end}}
             <div class="tab-bar">
               <label for="tab-select-logs" class="tab">Logs</label>
-              {{if .SelectedBackend.TCPPort}}<label for="tab-select-pg" class="tab">PG Messages</label>{{end}}
+              {{if eq .SelectedBackend.ServiceProtocol "postgresql"}}<label for="tab-select-pg" class="tab">PG Messages</label>{{end}}
             </div>
             <div id="tab-logs" class="tab-content">
               <div class="logs-header">
@@ -826,7 +826,7 @@
                 </div>
               </div>
             </div>
-            {{if .SelectedBackend.TCPPort}}
+            {{if eq .SelectedBackend.ServiceProtocol "postgresql"}}
             <div id="tab-pg" class="tab-content">
               <div class="pg-messages-container"
                    hx-ext="sse"
