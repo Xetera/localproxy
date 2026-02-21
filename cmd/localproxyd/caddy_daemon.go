@@ -22,6 +22,7 @@ import (
 	"github.com/xetera/localproxy/internal/proxy"
 	"github.com/xetera/localproxy/internal/proxy/protocol"
 	"github.com/xetera/localproxy/internal/registry"
+	"github.com/xetera/localproxy/pkg/tshark"
 )
 
 var adminSocket = filepath.Join(os.TempDir(), fmt.Sprintf("caddy-admin-%d.sock", os.Getuid()))
@@ -345,15 +346,14 @@ func (d *CaddyDaemon) onRoutesChanged(routes []proxy.Route, backends []dashboard
 	}
 
 	if d.captureManager != nil {
-		wantCaptures := make(map[int]protocol.CaptureConfig)
+		wantCaptures := make(map[int]tshark.CaptureConfig)
 		for _, r := range routes {
 			if r.TCPPort <= 0 {
 				continue
 			}
-			cfg := protocol.CaptureConfig{
+			cfg := tshark.CaptureConfig{
 				Interface: "lo0",
 				Port:      uint16(r.TCPPort),
-				Protocol:  protocol.TsharkTCP,
 			}
 			if r.ServiceProtocol == "postgres" {
 				cfg.DecodeAs = []string{"tcp.port==" + fmt.Sprintf("%d", r.TCPPort) + ",pgsql"}
