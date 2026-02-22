@@ -195,7 +195,11 @@ func BuildFullCaddyConfig(routes []Route, adminSocket string, httpsRedirect bool
 						WriterRaw: json.RawMessage(`{"output": "stdout"}`),
 						Level:     logLevel,
 					},
-					Exclude: []string{"http.handlers.reverse_proxy"},
+					Exclude: []string{
+						"http.handlers.reverse_proxy" /* SSE disconnect messages are too verbose */,
+						"admin" /* we don't need the admin interface */,
+						"http.auto_https" /* we don't do https with caddy */,
+					},
 				},
 				"reverse_proxy": {
 					BaseLog: caddy.BaseLog{
