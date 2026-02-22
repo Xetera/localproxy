@@ -195,6 +195,14 @@ func BuildFullCaddyConfig(routes []Route, adminSocket string, httpsRedirect bool
 						WriterRaw: json.RawMessage(`{"output": "stdout"}`),
 						Level:     logLevel,
 					},
+					Exclude: []string{"http.handlers.reverse_proxy"},
+				},
+				"reverse_proxy": {
+					BaseLog: caddy.BaseLog{
+						WriterRaw: json.RawMessage(`{"output": "stdout"}`),
+						Level:     "error",
+					},
+					Include: []string{"http.handlers.reverse_proxy"},
 				},
 			},
 		},
