@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -20,7 +21,6 @@ import (
 	"github.com/xetera/localproxy/internal/hosts"
 	"github.com/xetera/localproxy/internal/notification"
 	"github.com/xetera/localproxy/internal/proxy"
-	"github.com/xetera/localproxy/internal/proxy/protocol"
 	"github.com/xetera/localproxy/internal/registry"
 	"github.com/xetera/localproxy/pkg/tshark"
 )
@@ -32,6 +32,7 @@ type CaddyConfig struct {
 	LogLevel         string
 	TraceProcessLogs bool
 	HTTPSRedirect    bool
+	CaptureInterface string
 }
 
 type CaddyDaemon struct {
@@ -46,7 +47,11 @@ type CaddyDaemon struct {
 	processWatcher  *discovery.ProcessWatcher
 	dockerWatcher   *discovery.DockerWatcher
 	notifier        *notification.Notifier
-	captureManager  *protocol.CaptureManager
+
+	capture       *tshark.Capture
+	captureCancel context.CancelFunc
+	packetBuffers map[netip.AddrPort]*tshark.PacketBuffer
+	packetSubs    map[netip.AddrPort]*tshark.Subscription
 
 	seenBackends   map[string]bool
 	watcherStarted bool
@@ -69,11 +74,13 @@ func NewCaddyDaemon(cfg CaddyConfig) (*CaddyDaemon, error) {
 	log.SetOutput(io.MultiWriter(os.Stdout, logFile))
 
 	return &CaddyDaemon{
-		config:       cfg,
-		dataDir:      dataDir,
-		seenBackends: make(map[string]bool),
-		logFile:      logFile,
-		sigCh:        make(chan os.Signal, 1),
+		config:        cfg,
+		dataDir:       dataDir,
+		packetBuffers: make(map[netip.AddrPort]*tshark.PacketBuffer),
+		packetSubs:    make(map[netip.AddrPort]*tshark.Subscription),
+		seenBackends:  make(map[string]bool),
+		logFile:       logFile,
+		sigCh:         make(chan os.Signal, 1),
 	}, nil
 }
 
@@ -94,6 +101,8 @@ func (d *CaddyDaemon) Start() error {
 		return err
 	}
 
+	d.initCapture()
+
 	if err := d.dashboardServer.Start(); err != nil {
 		return err
 	}
@@ -110,10 +119,13 @@ func (d *CaddyDaemon) Start() error {
 }
 
 func (d *CaddyDaemon) Stop() {
-	caddy.Stop()
-	if d.captureManager != nil {
-		d.captureManager.Stop()
+	if d.captureCancel != nil {
+		d.captureCancel()
 	}
+	if d.capture != nil {
+		d.capture.Wait()
+	}
+	caddy.Stop()
 	if d.store != nil {
 		d.store.Close()
 	}
@@ -131,6 +143,69 @@ func (d *CaddyDaemon) Stop() {
 func (d *CaddyDaemon) Wait() {
 	signal.Notify(d.sigCh, syscall.SIGTERM, syscall.SIGINT)
 	<-d.sigCh
+}
+
+func (d *CaddyDaemon) initCapture() {
+	if _, err := tshark.FindTshark(); err != nil {
+		log.Printf("warning: packet capture disabled: %v", err)
+		return
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	d.captureCancel = cancel
+
+	cap := tshark.NewCapture(tshark.CaptureConfig{
+		Interface: d.config.CaptureInterface,
+	})
+	if err := cap.Start(ctx); err != nil {
+		log.Printf("warning: packet capture failed to start: %v", err)
+		cancel()
+		return
+	}
+
+	d.capture = cap
+	log.Printf("packet capture started on interface %s", d.config.CaptureInterface)
+}
+
+func (d *CaddyDaemon) PacketBuffer(endpoint netip.AddrPort) *tshark.PacketBuffer {
+	return d.packetBuffers[endpoint]
+}
+
+func (d *CaddyDaemon) updatePacketSubscriptions(backends []dashboard.Backend) {
+	if d.capture == nil {
+		return
+	}
+
+	current := make(map[netip.AddrPort]bool)
+	for _, b := range backends {
+		if b.Disabled {
+			continue
+		}
+		current[b.Endpoint] = true
+	}
+
+	for ep, sub := range d.packetSubs {
+		if !current[ep] {
+			sub.Close()
+			delete(d.packetSubs, ep)
+			delete(d.packetBuffers, ep)
+		}
+	}
+
+	for ep := range current {
+		if _, exists := d.packetSubs[ep]; exists {
+			continue
+		}
+		sub := d.capture.Subscribe(ep)
+		buf := tshark.NewPacketBuffer()
+		d.packetSubs[ep] = sub
+		d.packetBuffers[ep] = buf
+		go func() {
+			for pkt := range sub.C {
+				buf.Add(pkt)
+			}
+		}()
+	}
 }
 
 func (d *CaddyDaemon) initHosts() error {
@@ -155,18 +230,13 @@ func (d *CaddyDaemon) initRouting() error {
 	}
 	d.store = store
 
-	pgCh := make(chan protocol.PgMessage, 256)
-	PgMessageSink = pgCh
-
-	packetLog := protocol.NewPacketLog(1000)
-	d.captureManager = protocol.NewCaptureManager(packetLog)
-
 	basePaths := d.getBasePaths()
-	d.dashboardServer = dashboard.NewDashboardServer(basePaths, d.config.TraceProcessLogs, pgCh, packetLog)
+	d.dashboardServer = dashboard.NewDashboardServer(basePaths, d.config.TraceProcessLogs)
 	d.routeRegistry = registry.NewRouteRegistry(d.onRoutesChanged, d.store)
 
 	d.dashboardServer.SetRegistry(d.routeRegistry)
 	d.dashboardServer.SetStore(d.store)
+	d.dashboardServer.SetPacketSource(d)
 
 	d.store.SetOnChange(func() {
 		d.routeRegistry.RefreshRoutes()
@@ -227,7 +297,7 @@ func (d *CaddyDaemon) startCaddy() error {
 	}
 
 	var l4JSON json.RawMessage
-	if l4App := BuildL4App(routes); l4App != nil {
+	if l4App := proxy.BuildL4App(routes); l4App != nil {
 		var err error
 		l4JSON, err = json.Marshal(l4App)
 		if err != nil {
@@ -255,6 +325,7 @@ func (d *CaddyDaemon) getBasePaths() []string {
 
 func (d *CaddyDaemon) onRoutesChanged(routes []proxy.Route, backends []dashboard.Backend) {
 	d.dashboardServer.UpdateBackends(backends)
+	d.updatePacketSubscriptions(backends)
 
 	certPath, keyPath, _ := d.certMgr.GetCert("localhost")
 	dashboardEndpoint := netip.AddrPortFrom(netip.AddrFrom4([4]byte{127, 0, 0, 1}), dashboard.ServerPort)
@@ -313,7 +384,7 @@ func (d *CaddyDaemon) onRoutesChanged(routes []proxy.Route, backends []dashboard
 	}
 
 	var l4JSON json.RawMessage
-	if l4App := BuildL4App(routes); l4App != nil {
+	if l4App := proxy.BuildL4App(routes); l4App != nil {
 		var marshalErr error
 		l4JSON, marshalErr = json.Marshal(l4App)
 		if marshalErr != nil {
@@ -343,24 +414,6 @@ func (d *CaddyDaemon) onRoutesChanged(routes []proxy.Route, backends []dashboard
 		if err := d.hostsMgr.Update(subdomains); err != nil {
 			log.Printf("failed to update hosts: %v", err)
 		}
-	}
-
-	if d.captureManager != nil {
-		wantCaptures := make(map[int]tshark.CaptureConfig)
-		for _, r := range routes {
-			if r.TCPPort <= 0 {
-				continue
-			}
-			cfg := tshark.CaptureConfig{
-				Interface: "lo0",
-				Port:      uint16(r.TCPPort),
-			}
-			if r.ServiceProtocol == "postgres" {
-				cfg.DecodeAs = []string{"tcp.port==" + fmt.Sprintf("%d", r.TCPPort) + ",pgsql"}
-			}
-			wantCaptures[r.TCPPort] = cfg
-		}
-		d.captureManager.Sync(wantCaptures)
 	}
 
 	log.Printf("updated routes: %d active", len(routes))
@@ -418,4 +471,14 @@ func (d *CaddyDaemon) onUnroutedContainersChanged(containers []discovery.Unroute
 		}
 	}
 	d.dashboardServer.UpdateUnroutedContainers(unrouted)
+}
+
+func filterBySource(services []discovery.DiscoveredService, source discovery.RouteSource) []discovery.DiscoveredService {
+	var result []discovery.DiscoveredService
+	for _, s := range services {
+		if s.Source == source {
+			result = append(result, s)
+		}
+	}
+	return result
 }

@@ -5,15 +5,15 @@ import (
 )
 
 type TCPLayer struct {
-	SrcPort  uint16
-	DstPort  uint16
-	Seq      uint32
-	Ack      uint32
-	Flags    TCPFlags
-	Window   uint16
-	Length   int
-	Payload  []byte
-	fields   map[string]any
+	SrcPort uint16
+	DstPort uint16
+	Seq     uint32
+	Ack     uint32
+	Window  uint16
+	Flags   TCPFlags
+	Length  int
+	Payload []byte
+	fields  map[string]any
 }
 
 type TCPFlags struct {

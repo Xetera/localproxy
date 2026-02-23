@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"html"
 	"html/template"
 	"io"
 	"log"
@@ -20,7 +19,7 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/xetera/localproxy/internal/discovery"
-	"github.com/xetera/localproxy/internal/proxy/protocol"
+	"github.com/xetera/localproxy/pkg/tshark"
 )
 
 const (
@@ -88,6 +87,10 @@ type StoreInterface interface {
 	GetMappingSubdomainsByCwd(folderGroup string) (map[string]string, error)
 }
 
+type PacketSource interface {
+	PacketBuffer(endpoint netip.AddrPort) *tshark.PacketBuffer
+}
+
 type DashboardServer struct {
 	server             *http.Server
 	backends           map[string]Backend
@@ -97,21 +100,22 @@ type DashboardServer struct {
 	unroutedContainers []UnroutedContainer
 	registry           RegistryInterface
 	store              StoreInterface
-	pgLog              *protocol.PgMessageLog
-	pgMessages         <-chan protocol.PgMessage
-	packetLog          *protocol.PacketLog
-	stopPgDrain        chan struct{}
+	packetSource       PacketSource
+	packetRowTmpl      *template.Template
+	packetDetailTmpl   *template.Template
 }
 
-func NewDashboardServer(basePaths []string, traceProcessLogs bool, pgMessages <-chan protocol.PgMessage, packetLog *protocol.PacketLog) *DashboardServer {
+func NewDashboardServer(basePaths []string, traceProcessLogs bool) *DashboardServer {
+	templatesPath := getTemplatesPath()
+	packetRowTmpl := template.Must(template.ParseFiles(filepath.Join(templatesPath, "packet_row.html")))
+	packetDetailTmpl := template.Must(template.ParseFiles(filepath.Join(templatesPath, "packet_detail.html")))
+
 	s := &DashboardServer{
-		backends:    make(map[string]Backend),
-		logManager:  NewLogManager(traceProcessLogs),
-		basePaths:   basePaths,
-		pgLog:       protocol.NewPgMessageLog(1000),
-		pgMessages:  pgMessages,
-		packetLog:   packetLog,
-		stopPgDrain: make(chan struct{}),
+		backends:         make(map[string]Backend),
+		logManager:       NewLogManager(traceProcessLogs),
+		basePaths:        basePaths,
+		packetRowTmpl:    packetRowTmpl,
+		packetDetailTmpl: packetDetailTmpl,
 	}
 
 	mux := http.NewServeMux()
@@ -119,8 +123,8 @@ func NewDashboardServer(basePaths []string, traceProcessLogs bool, pgMessages <-
 	mux.HandleFunc("/logs", s.serveLogs)
 	mux.HandleFunc("/api/logs-preview", s.serveLogsPreview)
 	mux.HandleFunc("/api/subdomain-mapping", s.handleSubdomainMapping)
-	mux.HandleFunc("/api/pg-messages", s.streamPgMessages)
-	mux.HandleFunc("/api/packets", s.streamPackets)
+	mux.HandleFunc("/api/packets", s.servePackets)
+	mux.HandleFunc("/api/packet-detail", s.servePacketDetail)
 
 	s.server = &http.Server{
 		Addr:    fmt.Sprintf("127.0.0.1:%d", ServerPort),
@@ -128,6 +132,10 @@ func NewDashboardServer(basePaths []string, traceProcessLogs bool, pgMessages <-
 	}
 
 	return s
+}
+
+func (s *DashboardServer) SetPacketSource(ps PacketSource) {
+	s.packetSource = ps
 }
 
 func (s *DashboardServer) SetRegistry(registry RegistryInterface) {
@@ -241,146 +249,13 @@ func (s *DashboardServer) Start() error {
 			log.Printf("dashboard server error: %v", err)
 		}
 	}()
-	if s.pgMessages != nil {
-		go s.drainPgMessages()
-	}
 	return nil
-}
-
-func (s *DashboardServer) drainPgMessages() {
-	for {
-		select {
-		case msg, ok := <-s.pgMessages:
-			if !ok {
-				return
-			}
-			s.pgLog.Record(msg)
-		case <-s.stopPgDrain:
-			return
-		}
-	}
-}
-
-func renderPgMessageHTML(msg protocol.PgMessage) string {
-	ts := msg.Timestamp.Format("15:04:05.000")
-	arrow := "\u2192"
-	dirClass := "pg-dir-client"
-	if msg.Direction == protocol.DirectionServerToClient {
-		arrow = "\u2190"
-		dirClass = "pg-dir-server"
-	}
-
-	var detail string
-	if msg.Type == "Query" {
-		if m, ok := msg.Details.(map[string]any); ok {
-			if q, ok := m["query"].(string); ok {
-				detail = q
-			}
-		}
-	} else if msg.Details != nil {
-		if b, err := json.Marshal(msg.Details); err == nil {
-			detail = string(b)
-		}
-	}
-
-	return fmt.Sprintf(
-		`<div class="pg-msg"><span class="pg-ts">%s</span> <span class="pg-dir %s">%s</span> <span class="pg-type">%s</span> <span class="pg-detail">%s</span></div>`,
-		html.EscapeString(ts),
-		dirClass,
-		arrow,
-		html.EscapeString(msg.Type),
-		html.EscapeString(detail),
-	)
-}
-
-func (s *DashboardServer) streamPgMessages(w http.ResponseWriter, r *http.Request) {
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "streaming not supported", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-
-	subID, ch := s.pgLog.Subscribe()
-	defer s.pgLog.Unsubscribe(subID)
-
-	for _, msg := range s.pgLog.GetAll() {
-		fragment := renderPgMessageHTML(msg)
-		fmt.Fprintf(w, "event: pg-message\ndata: %s\n\n", fragment)
-	}
-	flusher.Flush()
-
-	for {
-		select {
-		case msg, ok := <-ch:
-			if !ok {
-				return
-			}
-			fragment := renderPgMessageHTML(msg)
-			fmt.Fprintf(w, "event: pg-message\ndata: %s\n\n", fragment)
-			flusher.Flush()
-		case <-r.Context().Done():
-			return
-		}
-	}
-}
-
-func (s *DashboardServer) streamPackets(w http.ResponseWriter, r *http.Request) {
-	if s.packetLog == nil {
-		http.Error(w, "packet capture not available", http.StatusServiceUnavailable)
-		return
-	}
-
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "streaming not supported", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-
-	subID, ch := s.packetLog.Subscribe()
-	defer s.packetLog.Unsubscribe(subID)
-
-	for _, pkt := range s.packetLog.GetAll() {
-		data, err := json.Marshal(pkt)
-		if err != nil {
-			continue
-		}
-		fmt.Fprintf(w, "event: packet\ndata: %s\n\n", data)
-	}
-	flusher.Flush()
-
-	for {
-		select {
-		case pkt, ok := <-ch:
-			if !ok {
-				return
-			}
-			data, err := json.Marshal(pkt)
-			if err != nil {
-				continue
-			}
-			fmt.Fprintf(w, "event: packet\ndata: %s\n\n", data)
-			flusher.Flush()
-		case <-r.Context().Done():
-			return
-		}
-	}
 }
 
 func (s *DashboardServer) Stop() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	close(s.stopPgDrain)
 	s.logManager.Stop()
 	return s.server.Shutdown(ctx)
 }

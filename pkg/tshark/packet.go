@@ -3,6 +3,7 @@ package tshark
 import (
 	"encoding/hex"
 	"encoding/json"
+	"net/netip"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +14,8 @@ type Packet struct {
 	Timestamp time.Time
 	Protocol  string
 	Length    int
+	Src       netip.AddrPort
+	Dst       netip.AddrPort
 	layers    map[string]json.RawMessage
 	raw       json.RawMessage
 }
@@ -98,6 +101,69 @@ func ParseEKPacket(line []byte) (*Packet, error) {
 				}
 			}
 		}
+	}
+
+	var srcIP, dstIP netip.Addr
+	var srcPort, dstPort uint16
+
+	if ipRaw, ok := obj.Layers["ip"]; ok {
+		var ip map[string]any
+		if err := json.Unmarshal(ipRaw, &ip); err == nil {
+			if s := ekString(ip, "ip_ip_src"); s != "" {
+				srcIP, _ = netip.ParseAddr(s)
+			}
+			if d := ekString(ip, "ip_ip_dst"); d != "" {
+				dstIP, _ = netip.ParseAddr(d)
+			}
+		}
+	}
+	if ip6Raw, ok := obj.Layers["ipv6"]; ok {
+		var ip6 map[string]any
+		if err := json.Unmarshal(ip6Raw, &ip6); err == nil {
+			if s := ekString(ip6, "ipv6_ipv6_src"); s != "" {
+				srcIP, _ = netip.ParseAddr(s)
+			}
+			if d := ekString(ip6, "ipv6_ipv6_dst"); d != "" {
+				dstIP, _ = netip.ParseAddr(d)
+			}
+		}
+	}
+
+	if tcpRaw, ok := obj.Layers["tcp"]; ok {
+		var tcp map[string]any
+		if err := json.Unmarshal(tcpRaw, &tcp); err == nil {
+			if v := ekString(tcp, "tcp_tcp_srcport"); v != "" {
+				if p, err := strconv.ParseUint(v, 10, 16); err == nil {
+					srcPort = uint16(p)
+				}
+			}
+			if v := ekString(tcp, "tcp_tcp_dstport"); v != "" {
+				if p, err := strconv.ParseUint(v, 10, 16); err == nil {
+					dstPort = uint16(p)
+				}
+			}
+		}
+	} else if udpRaw, ok := obj.Layers["udp"]; ok {
+		var udp map[string]any
+		if err := json.Unmarshal(udpRaw, &udp); err == nil {
+			if v := ekString(udp, "udp_udp_srcport"); v != "" {
+				if p, err := strconv.ParseUint(v, 10, 16); err == nil {
+					srcPort = uint16(p)
+				}
+			}
+			if v := ekString(udp, "udp_udp_dstport"); v != "" {
+				if p, err := strconv.ParseUint(v, 10, 16); err == nil {
+					dstPort = uint16(p)
+				}
+			}
+		}
+	}
+
+	if srcIP.IsValid() {
+		pkt.Src = netip.AddrPortFrom(srcIP, srcPort)
+	}
+	if dstIP.IsValid() {
+		pkt.Dst = netip.AddrPortFrom(dstIP, dstPort)
 	}
 
 	for name, raw := range obj.Layers {

@@ -2,6 +2,7 @@ package tshark
 
 import (
 	"bufio"
+	"net/netip"
 	"os"
 	"testing"
 )
@@ -56,6 +57,15 @@ func TestPacketFrame(t *testing.T) {
 	}
 	if pkt.Timestamp.IsZero() {
 		t.Error("expected non-zero timestamp")
+	}
+
+	expectedSrc := netip.MustParseAddrPort("[::1]:5432")
+	expectedDst := netip.MustParseAddrPort("[::1]:52770")
+	if pkt.Src != expectedSrc {
+		t.Errorf("expected src %s, got %s", expectedSrc, pkt.Src)
+	}
+	if pkt.Dst != expectedDst {
+		t.Errorf("expected dst %s, got %s", expectedDst, pkt.Dst)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/praetorian-inc/fingerprintx/pkg/plugins"
 	scan "github.com/praetorian-inc/fingerprintx/pkg/scan"
+	"github.com/xetera/localproxy/pkg/tshark"
 )
 
 type ServiceInfo struct {
@@ -19,6 +20,15 @@ type ServiceInfo struct {
 func ProbeEndpoints(ctx context.Context, addrs []netip.AddrPort, results chan<- []ServiceInfo) {
 	go func() {
 		defer close(results)
+
+		for _, addr := range addrs {
+			tshark.MarkDiscovery(addr)
+		}
+		defer func() {
+			for _, addr := range addrs {
+				tshark.ClearDiscovery(addr)
+			}
+		}()
 
 		t := make([]plugins.Target, 0)
 		for _, address := range addrs {

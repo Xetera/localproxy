@@ -59,6 +59,25 @@ type PgParameterStatus struct {
 	Length int
 }
 
+type PgRowDescription struct {
+	Columns []PgColumnDesc
+	Length  int
+}
+
+type PgColumnDesc struct {
+	Name     string
+	TableOID string
+	ColIndex string
+	TypeOID  string
+	TypeMod  string
+	Format   string
+}
+
+type PgDataRow struct {
+	Values []string
+	Length int
+}
+
 type PgUnknown struct {
 	Type   string
 	Length int
@@ -72,6 +91,8 @@ func (PgParse) pgMsg()           {}
 func (PgBind) pgMsg()            {}
 func (PgError) pgMsg()           {}
 func (PgParameterStatus) pgMsg() {}
+func (PgRowDescription) pgMsg()  {}
+func (PgDataRow) pgMsg()         {}
 func (PgUnknown) pgMsg()         {}
 
 func (PgStartup) MessageType() string         { return "Startup message" }
@@ -81,6 +102,8 @@ func (PgParse) MessageType() string           { return "Parse" }
 func (PgBind) MessageType() string            { return "Bind" }
 func (PgError) MessageType() string           { return "Error" }
 func (PgParameterStatus) MessageType() string { return "Parameter status" }
+func (PgRowDescription) MessageType() string  { return "Row description" }
+func (PgDataRow) MessageType() string         { return "Data row" }
 func (m PgUnknown) MessageType() string       { return m.Type }
 
 func parsePgSQLLayer(raw json.RawMessage) ([]PgSQLMessage, error) {
@@ -167,6 +190,42 @@ func parsePgSQLLayer(raw json.RawMessage) ([]PgSQLMessage, error) {
 			messages = append(messages, PgParameterStatus{
 				Name:   ekString(clean, "parameter_name"),
 				Value:  ekString(clean, "parameter_value"),
+				Length: length,
+			})
+
+		case "Row description":
+			names := ekStringSlice(clean, "col_name")
+			tableOIDs := ekStringSlice(clean, "oid_table")
+			colIndexes := ekStringSlice(clean, "col_index")
+			typeOIDs := ekStringSlice(clean, "oid_type")
+			typeMods := ekStringSlice(clean, "col_typemod")
+			formats := ekStringSlice(clean, "format")
+			msg := PgRowDescription{Length: length}
+			for i, name := range names {
+				col := PgColumnDesc{Name: name}
+				if i < len(tableOIDs) {
+					col.TableOID = tableOIDs[i]
+				}
+				if i < len(colIndexes) {
+					col.ColIndex = colIndexes[i]
+				}
+				if i < len(typeOIDs) {
+					col.TypeOID = typeOIDs[i]
+				}
+				if i < len(typeMods) {
+					col.TypeMod = typeMods[i]
+				}
+				if i < len(formats) {
+					col.Format = formats[i]
+				}
+				msg.Columns = append(msg.Columns, col)
+			}
+			messages = append(messages, msg)
+
+		case "Data row":
+			values := ekStringSlice(clean, "val_data")
+			messages = append(messages, PgDataRow{
+				Values: values,
 				Length: length,
 			})
 

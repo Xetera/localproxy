@@ -29,11 +29,13 @@ func main() {
 	var logLevel string
 	var traceProcessLogs bool
 	var httpsRedirect bool
+	var captureInterface string
 
 	flag.Var(&paths, "watch", "paths to watch for processes (can be specified multiple times)")
 	flag.StringVar(&logLevel, "log-level", "info", "log level")
 	flag.BoolVar(&traceProcessLogs, "trace-process-logs", false, "enable dtrace-based process log tracing")
 	flag.BoolVar(&httpsRedirect, "https-redirect", false, "redirect HTTP requests to HTTPS")
+	flag.StringVar(&captureInterface, "capture-interface", "any", "network interface for tshark packet capture")
 	flag.Parse()
 
 	if len(paths) == 0 {
@@ -47,6 +49,7 @@ func main() {
 		LogLevel:         logLevel,
 		TraceProcessLogs: traceProcessLogs,
 		HTTPSRedirect:    httpsRedirect,
+		CaptureInterface: captureInterface,
 	}
 
 	daemon, err := NewCaddyDaemon(cfg)

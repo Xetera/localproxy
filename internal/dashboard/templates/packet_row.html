@@ -1,0 +1,15 @@
+<div class="packet-row packet-{{.Direction}}"
+     hx-get="/api/packet-detail?subdomain={{.Subdomain}}&number={{.Number}}"
+     hx-target="next .packet-detail-slot"
+     hx-swap="innerHTML"
+     hx-trigger="click once"
+     onclick="var slot = this.nextElementSibling; slot.style.display = slot.style.display === 'none' ? '' : 'none';">
+  <span class="packet-ts">{{.Timestamp}}</span>
+  <span class="packet-addr">{{.Src}}</span>
+  <span class="packet-arrow">{{if eq .Direction "request"}}&rarr;{{else}}&larr;{{end}}</span>
+  <span class="packet-addr">{{.Dst}}</span>
+  <span class="packet-proto">{{.Protocol}}</span>
+  {{if .PgPreview}}<span class="packet-pg-preview">{{range $i, $m := .PgPreview}}{{if $i}}, {{end}}{{$m}}{{end}}</span>{{end}}
+  <span class="packet-len">{{.Length}}</span>
+</div>
+<div class="packet-detail-slot" style="display: none;"></div>

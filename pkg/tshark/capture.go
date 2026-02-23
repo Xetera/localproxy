@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"net/netip"
 	"os/exec"
 	"strconv"
 	"sync"
@@ -11,17 +12,8 @@ import (
 	"time"
 )
 
-type Protocol string
-
-const (
-	TCP Protocol = "tcp"
-	UDP Protocol = "udp"
-)
-
 type CaptureConfig struct {
 	Interface     string
-	Port          uint16
-	Protocol      Protocol
 	BPFFilter     string
 	DisplayFilter string
 	DecodeAs      []string
@@ -32,12 +24,25 @@ type CaptureConfig struct {
 }
 
 type Capture struct {
-	cfg     CaptureConfig
-	cmd     *exec.Cmd
-	packets chan *Packet
-	done    chan struct{}
-	err     error
-	mu      sync.Mutex
+	cfg  CaptureConfig
+	cmd  *exec.Cmd
+	done chan struct{}
+	err  error
+	mu   sync.Mutex
+
+	subs   map[netip.AddrPort][]*Subscription
+	subsMu sync.RWMutex
+}
+
+type Subscription struct {
+	C      <-chan *Packet
+	ch     chan *Packet
+	target netip.AddrPort
+	cap    *Capture
+}
+
+func (s *Subscription) Close() {
+	s.cap.unsubscribe(s)
 }
 
 func FindTshark() (string, error) {
@@ -50,20 +55,96 @@ func FindTshark() (string, error) {
 
 func NewCapture(cfg CaptureConfig) *Capture {
 	return &Capture{
-		cfg:     cfg,
-		packets: make(chan *Packet, 64),
-		done:    make(chan struct{}),
+		cfg:  cfg,
+		done: make(chan struct{}),
+		subs: make(map[netip.AddrPort][]*Subscription),
 	}
 }
 
-func (c *Capture) BPFFilter() string {
-	if c.cfg.BPFFilter != "" {
-		return c.cfg.BPFFilter
+var (
+	discoveryMu sync.Mutex
+	discovering map[netip.AddrPort]bool = make(map[netip.AddrPort]bool)
+)
+
+func MarkDiscovery(endpoint netip.AddrPort) {
+	discoveryMu.Lock()
+	discovering[endpoint] = true
+	discoveryMu.Unlock()
+}
+
+func ClearDiscovery(endpoint netip.AddrPort) {
+	discoveryMu.Lock()
+	delete(discovering, endpoint)
+	discoveryMu.Unlock()
+}
+
+func IsDiscovering(endpoint netip.AddrPort) bool {
+	discoveryMu.Lock()
+	defer discoveryMu.Unlock()
+	return discovering[endpoint]
+}
+
+func (c *Capture) Subscribe(target netip.AddrPort) *Subscription {
+	ch := make(chan *Packet, 64)
+	sub := &Subscription{
+		C:      ch,
+		ch:     ch,
+		target: target,
+		cap:    c,
 	}
-	if c.cfg.Port == 0 {
-		return ""
+	c.subsMu.Lock()
+	c.subs[target] = append(c.subs[target], sub)
+	c.subsMu.Unlock()
+	return sub
+}
+
+func (c *Capture) unsubscribe(sub *Subscription) {
+	c.subsMu.Lock()
+	subs := c.subs[sub.target]
+	for i, s := range subs {
+		if s == sub {
+			c.subs[sub.target] = append(subs[:i], subs[i+1:]...)
+			break
+		}
 	}
-	return fmt.Sprintf("port %d", c.cfg.Port)
+	if len(c.subs[sub.target]) == 0 {
+		delete(c.subs, sub.target)
+	}
+	c.subsMu.Unlock()
+	close(sub.ch)
+}
+
+func (c *Capture) deliver(pkt *Packet) {
+	discoveryMu.Lock()
+	isDiscoveringSrc := discovering[pkt.Src]
+	isDiscoveringDst := discovering[pkt.Dst]
+	discoveryMu.Unlock()
+
+	if isDiscoveringSrc || isDiscoveringDst {
+		return
+	}
+
+	c.subsMu.RLock()
+	defer c.subsMu.RUnlock()
+
+	targets := [2]netip.AddrPort{pkt.Src, pkt.Dst}
+	sent := make(map[*Subscription]bool)
+
+	for _, addr := range targets {
+		if !addr.IsValid() {
+			continue
+		}
+		for _, sub := range c.subs[addr] {
+			if sent[sub] {
+				continue
+			}
+			select {
+			case sub.ch <- pkt:
+			default:
+			}
+			sent[sub] = true
+		}
+	}
 }
 
 func (c *Capture) buildArgs() ([]string, error) {
@@ -78,8 +159,8 @@ func (c *Capture) buildArgs() ([]string, error) {
 		args = append(args, "-i", c.cfg.Interface)
 	}
 
-	if filter := c.BPFFilter(); filter != "" {
-		args = append(args, "-f", filter)
+	if c.cfg.BPFFilter != "" {
+		args = append(args, "-f", c.cfg.BPFFilter)
 	}
 
 	if c.cfg.DisplayFilter != "" {
@@ -138,7 +219,7 @@ func (c *Capture) Start(ctx context.Context) error {
 
 	go func() {
 		defer close(c.done)
-		defer close(c.packets)
+		defer c.closeAllSubs()
 
 		scanner := bufio.NewScanner(stdout)
 		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
@@ -153,11 +234,8 @@ func (c *Capture) Start(ctx context.Context) error {
 			if err != nil {
 				continue
 			}
-			select {
-			case c.packets <- pkt:
-			case <-ctx.Done():
-				return
-			}
+
+			c.deliver(pkt)
 		}
 
 		c.mu.Lock()
@@ -168,8 +246,15 @@ func (c *Capture) Start(ctx context.Context) error {
 	return nil
 }
 
-func (c *Capture) Packets() <-chan *Packet {
-	return c.packets
+func (c *Capture) closeAllSubs() {
+	c.subsMu.Lock()
+	defer c.subsMu.Unlock()
+	for addr, subs := range c.subs {
+		for _, sub := range subs {
+			close(sub.ch)
+		}
+		delete(c.subs, addr)
+	}
 }
 
 func (c *Capture) Stop() error {

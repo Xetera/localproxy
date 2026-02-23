@@ -1,0 +1,48 @@
+<div class="packet-detail">
+  <table class="packet-detail-table">
+    <tr>
+      <td class="packet-detail-label">Frame</td>
+      <td class="packet-detail-value">#{{.Number}}</td>
+    </tr>
+    <tr>
+      <td class="packet-detail-label">Length</td>
+      <td class="packet-detail-value">{{.Length}} bytes</td>
+    </tr>
+    <tr>
+      <td class="packet-detail-label">Layers</td>
+      <td class="packet-detail-value">{{range $i, $l := .Layers}}{{if $i}}, {{end}}{{$l}}{{end}}</td>
+    </tr>
+  </table>
+  {{if .TCP}}
+  <div class="packet-detail-heading">TCP</div>
+  <table class="packet-detail-table">
+    <tr>
+      <td class="packet-detail-label">Seq / Ack</td>
+      <td class="packet-detail-value">{{.TCP.Seq}} / {{.TCP.Ack}}</td>
+    </tr>
+    <tr>
+      <td class="packet-detail-label">Flags</td>
+      <td class="packet-detail-value">{{.TCP.FlagsStr}}</td>
+    </tr>
+    <tr>
+      <td class="packet-detail-label">Window</td>
+      <td class="packet-detail-value">{{.TCP.Window}}</td>
+    </tr>
+    <tr>
+      <td class="packet-detail-label">Payload</td>
+      <td class="packet-detail-value">{{.TCP.PayloadLen}} bytes</td>
+    </tr>
+  </table>
+  {{end}}
+  {{range .PgMessages}}
+  <div class="packet-detail-heading">{{.Type}}</div>
+  <table class="packet-detail-table">
+    {{range .Fields}}
+    <tr>
+      <td class="packet-detail-label">{{.Label}}</td>
+      <td class="packet-detail-value{{if .Mono}} packet-detail-mono{{end}}">{{.Value}}</td>
+    </tr>
+    {{end}}
+  </table>
+  {{end}}
+</div>
