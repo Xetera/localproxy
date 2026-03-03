@@ -11,7 +11,7 @@ import (
 	"github.com/mholt/caddy-l4/modules/l4tls"
 )
 
-func mustL4Handler(name string, h any) json.RawMessage {
+func mustL4Handler(name string, h any, alpn []string) json.RawMessage {
 	b, err := json.Marshal(h)
 	if err != nil {
 		panic(err)
@@ -19,8 +19,25 @@ func mustL4Handler(name string, h any) json.RawMessage {
 	var m map[string]any
 	json.Unmarshal(b, &m)
 	m["handler"] = name
+	if alpn != nil {
+		injectALPN(m, alpn)
+	}
 	out, _ := json.Marshal(m)
 	return out
+}
+
+var l4ALPN = []string{"postgresql"}
+
+func injectALPN(m map[string]any, alpn []string) {
+	policies, ok := m["connection_policies"].([]any)
+	if !ok {
+		return
+	}
+	for _, p := range policies {
+		if pol, ok := p.(map[string]any); ok {
+			pol["alpn"] = alpn
+		}
+	}
 }
 
 func BuildL4App(routes []Route) *layer4.App {
@@ -84,8 +101,8 @@ func BuildL4App(routes []Route) *layer4.App {
 					{"tls": sniJSON},
 				},
 				HandlersRaw: []json.RawMessage{
-					mustL4Handler("tls", tlsHandler),
-					mustL4Handler("proxy", proxyHandler),
+					mustL4Handler("tls", tlsHandler, l4ALPN),
+					mustL4Handler("proxy", proxyHandler, nil),
 				},
 			}
 
@@ -101,7 +118,7 @@ func BuildL4App(routes []Route) *layer4.App {
 		}
 		fallbackRoute := &layer4.Route{
 			HandlersRaw: []json.RawMessage{
-				mustL4Handler("proxy", fallbackProxy),
+				mustL4Handler("proxy", fallbackProxy, nil),
 			},
 		}
 		l4Routes = append(l4Routes, fallbackRoute)
