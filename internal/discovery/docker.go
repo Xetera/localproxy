@@ -150,13 +150,7 @@ func (w *DockerWatcher) parseContainer(c container.Summary) (*DiscoveredService,
 			PrivatePort: int(p.PrivatePort),
 			Type:        p.Type,
 		}
-		var portValue uint16
-		if p.PublicPort > 0 {
-			portValue = p.PublicPort
-		} else {
-			portValue = p.PrivatePort
-		}
-		endpoint, _ := netip.ParseAddrPort(fmt.Sprintf("%s:%d", ip, portValue))
+		endpoint, _ := netip.ParseAddrPort(fmt.Sprintf("%s:%d", ip, p.PrivatePort))
 		dp.Endpoint = endpoint
 		log.Println(dp.Endpoint)
 		allPorts = append(allPorts, dp)
