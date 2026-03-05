@@ -40,7 +40,6 @@ type WellKnownPortInfo struct {
 
 var WellKnownPorts = map[uint16]WellKnownPortInfo{
 	8384:  {"syncthing", ProtocolHTTP, 0},
-	5432:  {"postgres", ProtocolTCP, 15432},
 	6379:  {"redis", ProtocolTCP, 16379},
 	9200:  {"elasticsearch", ProtocolHTTP, 0},
 	27017: {"mongodb", ProtocolTCP, 17017},

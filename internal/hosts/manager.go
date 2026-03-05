@@ -41,6 +41,7 @@ func (m *Manager) Update(subdomains []string) error {
 			hostnames = append(hostnames, "localhost")
 		} else {
 			hostnames = append(hostnames, fmt.Sprintf("%s.localhost", sub))
+			hostnames = append(hostnames, fmt.Sprintf("%s.internal", sub))
 		}
 	}
 

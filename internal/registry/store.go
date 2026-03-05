@@ -156,7 +156,7 @@ func (s *Store) RemoveProject(name string) error {
 	})
 	if err == nil && port > 0 {
 		s.db.Update(func(tx *bolt.Tx) error {
-			return tx.Bucket(portsBucket).Delete([]byte(fmt.Sprintf("%d", port)))
+			return tx.Bucket(portsBucket).Delete(fmt.Appendf(nil, "%d", port))
 		})
 		s.notifyChange()
 	}

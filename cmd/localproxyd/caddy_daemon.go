@@ -18,6 +18,7 @@ import (
 	"github.com/xetera/localproxy/internal/certs"
 	"github.com/xetera/localproxy/internal/dashboard"
 	"github.com/xetera/localproxy/internal/discovery"
+	localdns "github.com/xetera/localproxy/internal/dns"
 	"github.com/xetera/localproxy/internal/hosts"
 	"github.com/xetera/localproxy/internal/notification"
 	"github.com/xetera/localproxy/internal/proxy"
@@ -33,6 +34,7 @@ type CaddyConfig struct {
 	TraceProcessLogs bool
 	HTTPSRedirect    bool
 	CaptureInterface string
+	DNSServerPort    int
 }
 
 type CaddyDaemon struct {
@@ -47,6 +49,8 @@ type CaddyDaemon struct {
 	processWatcher  *discovery.ProcessWatcher
 	dockerWatcher   *discovery.DockerWatcher
 	notifier        *notification.Notifier
+
+	dnsServer *localdns.Server
 
 	capture       *tshark.Capture
 	captureCancel context.CancelFunc
@@ -101,6 +105,8 @@ func (d *CaddyDaemon) Start() error {
 		return err
 	}
 
+	d.initDNS()
+
 	d.initCapture()
 
 	if err := d.dashboardServer.Start(); err != nil {
@@ -119,6 +125,9 @@ func (d *CaddyDaemon) Start() error {
 }
 
 func (d *CaddyDaemon) Stop() {
+	if d.dnsServer != nil {
+		d.dnsServer.Stop()
+	}
 	if d.captureCancel != nil {
 		d.captureCancel()
 	}
@@ -165,6 +174,30 @@ func (d *CaddyDaemon) initCapture() {
 
 	d.capture = cap
 	log.Printf("packet capture started on interface %s", d.config.CaptureInterface)
+}
+
+func (d *CaddyDaemon) initDNS() {
+	if d.config.DNSServerPort == 0 {
+		return
+	}
+
+	if d.dockerWatcher == nil {
+		log.Printf("warning: DNS server requires docker watcher, skipping")
+		return
+	}
+
+	srv, err := localdns.NewServer(d.config.DNSServerPort, d.dockerWatcher.Client())
+	if err != nil {
+		log.Printf("warning: DNS server disabled: %v", err)
+		return
+	}
+
+	if err := srv.Start(); err != nil {
+		log.Printf("warning: DNS server failed to start: %v", err)
+		return
+	}
+
+	d.dnsServer = srv
 }
 
 func (d *CaddyDaemon) PacketBuffer(endpoint netip.AddrPort) *tshark.PacketBuffer {

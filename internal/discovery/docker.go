@@ -79,6 +79,10 @@ func (w *DockerWatcher) Start() error {
 	return nil
 }
 
+func (w *DockerWatcher) Client() *client.Client {
+	return w.client
+}
+
 func (w *DockerWatcher) Stop() {
 	w.cancel()
 	w.client.Close()

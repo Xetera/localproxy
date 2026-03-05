@@ -118,7 +118,7 @@ func BuildCaddyConfig(routes []Route, httpsRedirect bool) (*caddyhttp.App, *cadd
 	connPolicies = append(connPolicies, &caddytls.ConnectionPolicy{})
 
 	httpsServer := &caddyhttp.Server{
-		Listen:          []string{"0.0.0.0:443"},
+		Listen:          []string{"0.0.0.0:443", "[::]:443"},
 		TLSConnPolicies: connPolicies,
 		Routes:          httpsRoutes,
 		AutoHTTPS:       &caddyhttp.AutoHTTPSConfig{Disabled: true},
@@ -144,10 +144,9 @@ func BuildCaddyConfig(routes []Route, httpsRedirect bool) (*caddyhttp.App, *cadd
 	}
 
 	httpServer := &caddyhttp.Server{
-		Listen:    []string{"0.0.0.0:80"},
+		Listen:    []string{"0.0.0.0:80", "[::]:80"},
 		Routes:    httpServerRoutes,
 		AutoHTTPS: &caddyhttp.AutoHTTPSConfig{Disabled: true},
-		Protocols: []string{"h1"},
 	}
 
 	httpApp := &caddyhttp.App{
@@ -196,9 +195,9 @@ func BuildFullCaddyConfig(routes []Route, adminSocket string, httpsRedirect bool
 						Level:     logLevel,
 					},
 					Exclude: []string{
-						"http.handlers.reverse_proxy" /* SSE disconnect messages are too verbose */,
-						"admin" /* we don't need the admin interface */,
-						"http.auto_https" /* we don't do https with caddy */,
+						"http.handlers.reverse_proxy", /* SSE disconnect messages are too verbose */
+						"admin",                       /* we don't need the admin interface */
+						"http.auto_https",             /* we don't do https with caddy */
 					},
 				},
 				"reverse_proxy": {

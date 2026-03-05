@@ -58,7 +58,7 @@ npm run dev
 curl https://project1.localhost
 ```
 
-### Docker example with labels
+## Docker
 
 Proxying traffic to docker containers works without exposing ports using `-p`. Instead you can use the following labels to configure the proxy behavior:
 
@@ -66,41 +66,52 @@ Proxying traffic to docker containers works without exposing ports using `-p`. I
 - `localproxy.port` 443/80 -> $port (used for webservers)
 - `localproxy.tcpport` $tcpport -> $tcpport (used for for tcp servers that listen non non-web ports)
 
-To allow reaching out to localproxy urls _from within_ containers, you need to use and map the alternative `.internal` tld to `host-gateway` using `--add-hosts`. `.localhost` specifically only points to 127.0.0.1 as per its RFC, which creates problems
+Proxying traffic _from inside_ docker containers is a little bit tricker. Unsurprisingly, `127.0.0.1` does not point to the host from within containers. To allow resolving localproxy domains from inside containers, you will need to configure docker to reach out to localproxy's DNS server that you enable with `--dns-server-port 53`. Although the port is configurable, you'll want port 53 as that's not configurable for DNS resolution in docker.
 
-##### Using docker run
+### Regular Docker (Linux)
 
-```sh
-docker run --add-host=test.internal:host-gateway alpine/curl https://test.internal
+Edit `~/.docker/daemon.json` to include the dns field along with a fallback to make sure docker continues running if localproxy turns off.
+
+```json
+{
+  "dns": ["127.0.0.1", "9.9.9.9"]
+}
 ```
 
-##### Using docker-compose
+### Orbstack (MacOS)
 
-```yaml
-services:
-  curl:
-    image: alpine/curl
-    command: curl https://test.internal
-    extra_hosts:
-      - test.internal:host-gateway
+Docker on MacOS has a linux VM layer and orbstack specifically uses `~/.orbstack/config/docker.json`. Because of the VM, you can either point it to the bridge IP (192.168.139.3 for me currently) but that's prone to being re-assigned. So I instead set it as my computer's private IP which is 10.0.0.185 for me but will be something different for you.
+
+You can run `ipconfig getifaddr en0` to find your address.
+
+```json
+{
+  "dns": ["10.0.0.185", "9.9.9.9"]
+}
 ```
 
-#### Postgres
+### Windows
+
+TBA
+
+#### Working with Postgres
+
+There's no specific configuration required for Postgres. But if you want to run more than one postgres instance on port 5432 you will need a way to route traffic to the right database on the domain name (SNI field in TLS handshakes).
 
 ```sh
-docker run --name postgres -l localproxy.tcpport=5432 -e POSTGRES_HOST_AUTH_METHOD=trust postgres
+docker run --name db -l localproxy.tcpport=5432 -e POSTGRES_HOST_AUTH_METHOD=trust postgres
 ```
 
 Two requirements for connection:
 
 1. `sslmode` has to be `require` to not attempt a plaintext connection
-2. `sslnegotiation` has to be `direct` to use TLS instead of STARTTLS
+2. `sslnegotiation` has to be `direct` to use TLS instead of STARTTLS which Caddy doesn't support
 
 ```sh
-psql "postgresql://postgres@postgres.localhost/postgres?sslmode=require&sslnegotiation=direct"
+psql "postgresql://postgres@db.localhost/postgres?sslmode=require&sslnegotiation=direct"
 ```
 
-#### Redis
+#### Working with Redis
 
 ```sh
 docker run --name myredis -l localproxy.tcpport=6379 redis
@@ -112,18 +123,4 @@ Connect to it from the host without exposing ports. Sadly redis-cli doesn't seem
 redis-cli --tls --insecure -h myredis.localhost --sni myredis.localhost
 # If you want to explicitly verify the certificate
 redis-cli --tls --cacert "$(mkcert -CAROOT)/rootCA.pem" -h myredis.localhost --sni myredis.localhost
-```
-
-### Logs
-
-By default localproxy tries to capture stdout logs from local processes as well as docker containers. However on macos this requires you to partially turn off SIP in recovery mode with
-
-```sh
-csrutil enable --without dtrace
-```
-
-If you're a yabai user, you'll want to combine this with the flags yabai requires. [Relevant documentation.](https://github.com/asmvik/yabai/wiki/Disabling-System-Integrity-Protection)
-
-```sh
-csrutil enable --without dtrace --without fs --without debug --without nvram
 ```
